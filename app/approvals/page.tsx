@@ -20,6 +20,7 @@ const statusColors = {
 }
 
 export default function ApprovalsPage() {
+  const [approvalList, setApprovalList] = useState(approvals)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [selectedType, setSelectedType] = useState('all')
@@ -27,8 +28,23 @@ export default function ApprovalsPage() {
   const [actionModal, setActionModal] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null)
   const [rejectionNote, setRejectionNote] = useState('')
 
+  const handleApprove = (id: string) => {
+    setApprovalList(approvalList.map(a => 
+      a.id === id ? {...a, status: 'approved' as const, approvedBy: 'Current User', approvalDate: new Date().toISOString().split('T')[0]} : a
+    ))
+    setActionModal(null)
+  }
+
+  const handleReject = (id: string) => {
+    setApprovalList(approvalList.map(a => 
+      a.id === id ? {...a, status: 'rejected' as const, approvedBy: 'Current User', approvalDate: new Date().toISOString().split('T')[0], notes: rejectionNote} : a
+    ))
+    setActionModal(null)
+    setRejectionNote('')
+  }
+
   const filteredApprovals = useMemo(() => {
-    return approvals.filter((approval) => {
+    return approvalList.filter((approval) => {
       const matchesSearch =
         approval.requestId.toLowerCase().includes(searchTerm.toLowerCase()) ||
         approval.requestedBy.toLowerCase().includes(searchTerm.toLowerCase())
@@ -62,7 +78,7 @@ export default function ApprovalsPage() {
     a.click()
   }
 
-  const pendingCount = approvals.filter((a) => a.status === 'pending').length
+  const pendingCount = approvalList.filter((a) => a.status === 'pending').length
 
   return (
     <div className="space-y-6">
@@ -143,7 +159,7 @@ export default function ApprovalsPage() {
 
       {/* Results */}
       <div className="text-sm text-slate-600">
-        Showing {filteredApprovals.length} of {approvals.length} approvals
+        Showing {filteredApprovals.length} of {approvalList.length} approvals
       </div>
 
       {/* Approvals List */}
@@ -292,8 +308,11 @@ export default function ApprovalsPage() {
                 </Button>
                 <Button
                   onClick={() => {
-                    setActionModal(null)
-                    setRejectionNote('')
+                    if (actionModal.action === 'approve') {
+                      handleApprove(actionModal.id)
+                    } else {
+                      handleReject(actionModal.id)
+                    }
                   }}
                   className={`flex-1 ${actionModal.action === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
                 >

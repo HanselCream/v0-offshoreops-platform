@@ -8,13 +8,36 @@ import { Input } from '@/components/ui/input'
 import { inventoryItems, categories, locations } from '@/lib/mock-data'
 
 export default function InventoryPage() {
+  const [items, setItems] = useState(inventoryItems)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
   const [showModal, setShowModal] = useState(false)
+  const [formData, setFormData] = useState({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', unitPrice: '' })
+
+  const handleAddItem = () => {
+    if (!formData.name || !formData.sku || !formData.category || !formData.location) {
+      alert('Please fill in all required fields')
+      return
+    }
+    const newItem = {
+      id: (Math.max(...items.map(i => parseInt(i.id))) + 1).toString(),
+      name: formData.name,
+      sku: formData.sku,
+      category: formData.category,
+      location: formData.location,
+      quantity: parseInt(formData.quantity) || 0,
+      minStock: parseInt(formData.minStock) || 0,
+      unitPrice: parseFloat(formData.unitPrice) || 0,
+      lastUpdated: new Date().toISOString(),
+    }
+    setItems([...items, newItem])
+    setFormData({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', unitPrice: '' })
+    setShowModal(false)
+  }
 
   const filteredItems = useMemo(() => {
-    return inventoryItems.filter((item) => {
+    return items.filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.sku.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory
@@ -126,7 +149,7 @@ export default function InventoryPage() {
 
       {/* Results */}
       <div className="text-sm text-slate-600">
-        Showing {filteredItems.length} of {inventoryItems.length} items
+        Showing {filteredItems.length} of {items.length} items
       </div>
 
       {/* Table */}
@@ -191,20 +214,33 @@ export default function InventoryPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Item Name
                 </label>
-                <Input placeholder="Enter item name" />
+                <Input 
+                  placeholder="Enter item name" 
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   SKU
                 </label>
-                <Input placeholder="Enter SKU" />
+                <Input 
+                  placeholder="Enter SKU" 
+                  value={formData.sku}
+                  onChange={(e) => setFormData({...formData, sku: e.target.value})}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Category
                   </label>
-                  <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                  <select 
+                    value={formData.category}
+                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                  >
+                    <option value="">Select Category</option>
                     {categories.map((cat) => (
                       <option key={cat.id} value={cat.name}>
                         {cat.name}
@@ -216,7 +252,12 @@ export default function InventoryPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Location
                   </label>
-                  <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                  <select 
+                    value={formData.location}
+                    onChange={(e) => setFormData({...formData, location: e.target.value})}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                  >
+                    <option value="">Select Location</option>
                     {locations.map((loc) => (
                       <option key={loc.id} value={loc.name}>
                         {loc.name}
@@ -225,17 +266,35 @@ export default function InventoryPage() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Quantity
-                </label>
-                <Input type="number" placeholder="0" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Quantity
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Unit Price
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={formData.unitPrice}
+                    onChange={(e) => setFormData({...formData, unitPrice: e.target.value})}
+                  />
+                </div>
               </div>
               <div className="flex gap-2 pt-4">
                 <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
                   Cancel
                 </Button>
-                <Button onClick={() => setShowModal(false)} className="flex-1">
+                <Button onClick={handleAddItem} className="flex-1">
                   Add Item
                 </Button>
               </div>

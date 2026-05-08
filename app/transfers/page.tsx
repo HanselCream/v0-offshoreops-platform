@@ -15,13 +15,46 @@ const statusColors = {
 }
 
 export default function TransfersPage() {
+  const [transferList, setTransferList] = useState(transfers)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [formData, setFormData] = useState({ fromLocation: '', toLocation: '', items: [] as Array<{itemId: string, quantity: number}> })
+
+  const handleApproveTransfer = (id: string) => {
+    setTransferList(transferList.map(t => 
+      t.id === id ? {...t, status: 'approved' as const, approvedBy: 'Current User', approvalDate: new Date().toISOString().split('T')[0]} : t
+    ))
+  }
+
+  const handleRejectTransfer = (id: string) => {
+    setTransferList(transferList.map(t => 
+      t.id === id ? {...t, status: 'rejected' as const} : t
+    ))
+  }
+
+  const handleCreateTransfer = () => {
+    if (!formData.fromLocation || !formData.toLocation || formData.items.length === 0) {
+      alert('Please fill in all required fields and select at least one item')
+      return
+    }
+    const newTransfer = {
+      id: (Math.max(...transferList.map(t => parseInt(t.id))) + 1).toString(),
+      fromLocation: formData.fromLocation,
+      toLocation: formData.toLocation,
+      status: 'pending' as const,
+      items: formData.items,
+      createdBy: 'Current User',
+      createdDate: new Date().toISOString().split('T')[0],
+    }
+    setTransferList([...transferList, newTransfer])
+    setFormData({ fromLocation: '', toLocation: '', items: [] })
+    setShowModal(false)
+  }
 
   const filteredTransfers = useMemo(() => {
-    return transfers.filter((transfer) => {
+    return transferList.filter((transfer) => {
       const matchesSearch =
         transfer.fromLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
         transfer.toLocation.toLowerCase().includes(searchTerm.toLowerCase())
@@ -110,7 +143,7 @@ export default function TransfersPage() {
 
       {/* Results */}
       <div className="text-sm text-slate-600">
-        Showing {filteredTransfers.length} of {transfers.length} transfers
+        Showing {filteredTransfers.length} of {transferList.length} transfers
       </div>
 
       {/* Transfers List */}
@@ -140,11 +173,21 @@ export default function TransfersPage() {
                   <p className="font-semibold text-slate-900">{transfer.items.length} items</p>
                   {transfer.status === 'pending' && (
                     <div className="flex gap-2 mt-2">
-                      <Button size="sm" variant="outline" className="gap-1">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="gap-1"
+                        onClick={() => handleApproveTransfer(transfer.id)}
+                      >
                         <Check className="w-4 h-4" />
                         Approve
                       </Button>
-                      <Button size="sm" variant="outline" className="gap-1 text-red-600">
+                      <Button 
+                        size="sm" 
+                        variant="outline" 
+                        className="gap-1 text-red-600"
+                        onClick={() => handleRejectTransfer(transfer.id)}
+                      >
                         <X className="w-4 h-4" />
                         Reject
                       </Button>
@@ -214,7 +257,12 @@ export default function TransfersPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   From Location
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                <select 
+                  value={formData.fromLocation}
+                  onChange={(e) => setFormData({...formData, fromLocation: e.target.value})}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                >
+                  <option value="">Select From Location</option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.name}>
                       {loc.name}
@@ -226,7 +274,12 @@ export default function TransfersPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   To Location
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                <select 
+                  value={formData.toLocation}
+                  onChange={(e) => setFormData({...formData, toLocation: e.target.value})}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                >
+                  <option value="">Select To Location</option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.name}>
                       {loc.name}
@@ -239,9 +292,19 @@ export default function TransfersPage() {
                   Select Items
                 </label>
                 <div className="border border-border rounded-md p-2 bg-white max-h-40 overflow-y-auto">
-                  {inventoryItems.slice(0, 3).map((item) => (
+                  {inventoryItems.map((item) => (
                     <label key={item.id} className="flex items-center gap-2 p-2 hover:bg-slate-50">
-                      <input type="checkbox" className="rounded" />
+                      <input 
+                        type="checkbox" 
+                        className="rounded"
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setFormData({...formData, items: [...formData.items, {itemId: item.id, quantity: 1}]})
+                          } else {
+                            setFormData({...formData, items: formData.items.filter(i => i.itemId !== item.id)})
+                          }
+                        }}
+                      />
                       <span className="text-sm">{item.name}</span>
                     </label>
                   ))}
@@ -251,7 +314,7 @@ export default function TransfersPage() {
                 <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
                   Cancel
                 </Button>
-                <Button onClick={() => setShowModal(false)} className="flex-1">
+                <Button onClick={handleCreateTransfer} className="flex-1">
                   Create Transfer
                 </Button>
               </div>

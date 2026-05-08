@@ -20,13 +20,43 @@ const statusIcons = {
 }
 
 export default function PPEPage() {
+  const [ppeList, setPpeList] = useState(ppeItems)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
   const [showModal, setShowModal] = useState(false)
+  const [formData, setFormData] = useState({ name: '', type: '', location: '', quantity: '', expiryDate: '' })
+
+  const handleAddPPE = () => {
+    if (!formData.name || !formData.type || !formData.location || !formData.expiryDate) {
+      alert('Please fill in all required fields')
+      return
+    }
+    const expiryDate = new Date(formData.expiryDate)
+    const today = new Date()
+    const daysUntilExpiry = Math.floor((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+    
+    let status: 'active' | 'expiring-soon' | 'expired' = 'active'
+    if (daysUntilExpiry < 0) status = 'expired'
+    else if (daysUntilExpiry < 30) status = 'expiring-soon'
+
+    const newPPE = {
+      id: (Math.max(...ppeList.map(i => parseInt(i.id))) + 1).toString(),
+      name: formData.name,
+      type: formData.type,
+      location: formData.location,
+      quantity: parseInt(formData.quantity) || 0,
+      expiryDate: formData.expiryDate,
+      status,
+      lastUpdated: new Date().toISOString(),
+    }
+    setPpeList([...ppeList, newPPE])
+    setFormData({ name: '', type: '', location: '', quantity: '', expiryDate: '' })
+    setShowModal(false)
+  }
 
   const filteredItems = useMemo(() => {
-    return ppeItems.filter((item) => {
+    return ppeList.filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.type.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesStatus = selectedStatus === 'all' || item.status === selectedStatus
@@ -59,8 +89,8 @@ export default function PPEPage() {
     a.click()
   }
 
-  const expiredCount = ppeItems.filter((item) => item.status === 'expired').length
-  const expiringCount = ppeItems.filter((item) => item.status === 'expiring-soon').length
+  const expiredCount = ppeList.filter((item) => item.status === 'expired').length
+  const expiringCount = ppeList.filter((item) => item.status === 'expiring-soon').length
 
   return (
     <div className="space-y-6">
@@ -166,7 +196,7 @@ export default function PPEPage() {
 
       {/* Results */}
       <div className="text-sm text-slate-600">
-        Showing {filteredItems.length} of {ppeItems.length} items
+        Showing {filteredItems.length} of {ppeList.length} items
       </div>
 
       {/* Table */}
@@ -230,19 +260,32 @@ export default function PPEPage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Item Name
                 </label>
-                <Input placeholder="Enter PPE item name" />
+                <Input 
+                  placeholder="Enter PPE item name" 
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Type
                 </label>
-                <Input placeholder="e.g., Head Protection, Life Safety" />
+                <Input 
+                  placeholder="e.g., Head Protection, Life Safety" 
+                  value={formData.type}
+                  onChange={(e) => setFormData({...formData, type: e.target.value})}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Location
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                <select 
+                  value={formData.location}
+                  onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                >
+                  <option value="">Select Location</option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.name}>
                       {loc.name}
@@ -255,20 +298,29 @@ export default function PPEPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Quantity
                   </label>
-                  <Input type="number" placeholder="0" />
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Expiry Date
                   </label>
-                  <Input type="date" />
+                  <Input 
+                    type="date" 
+                    value={formData.expiryDate}
+                    onChange={(e) => setFormData({...formData, expiryDate: e.target.value})}
+                  />
                 </div>
               </div>
               <div className="flex gap-2 pt-4">
                 <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
                   Cancel
                 </Button>
-                <Button onClick={() => setShowModal(false)} className="flex-1">
+                <Button onClick={handleAddPPE} className="flex-1">
                   Add Item
                 </Button>
               </div>

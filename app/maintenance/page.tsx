@@ -22,14 +22,42 @@ const statusIcons = {
 }
 
 export default function MaintenancePage() {
+  const [tasks, setTasks] = useState(maintenanceTasks)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [formData, setFormData] = useState({ equipmentName: '', type: '', location: '', scheduledDate: '', assignedTo: '' })
+
+  const handleAddTask = () => {
+    if (!formData.equipmentName || !formData.type || !formData.location || !formData.scheduledDate) {
+      alert('Please fill in all required fields')
+      return
+    }
+    const newTask = {
+      id: (Math.max(...tasks.map(t => parseInt(t.id))) + 1).toString(),
+      equipmentId: (Math.max(...tasks.map(t => parseInt(t.equipmentId))) + 1).toString(),
+      equipmentName: formData.equipmentName,
+      type: formData.type,
+      location: formData.location,
+      scheduledDate: formData.scheduledDate,
+      status: 'pending' as const,
+      assignedTo: formData.assignedTo || 'Unassigned',
+    }
+    setTasks([...tasks, newTask])
+    setFormData({ equipmentName: '', type: '', location: '', scheduledDate: '', assignedTo: '' })
+    setShowModal(false)
+  }
+
+  const handleCompleteTask = (id: string) => {
+    setTasks(tasks.map(t => 
+      t.id === id ? {...t, status: 'completed' as const, completedDate: new Date().toISOString().split('T')[0]} : t
+    ))
+  }
 
   const filteredTasks = useMemo(() => {
-    return maintenanceTasks.filter((task) => {
+    return tasks.filter((task) => {
       const matchesSearch =
         task.equipmentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         task.type.toLowerCase().includes(searchTerm.toLowerCase())
@@ -153,7 +181,7 @@ export default function MaintenancePage() {
 
       {/* Results */}
       <div className="text-sm text-slate-600">
-        Showing {filteredTasks.length} of {maintenanceTasks.length} tasks
+        Showing {filteredTasks.length} of {tasks.length} tasks
       </div>
 
       {/* Tasks List */}
@@ -242,23 +270,37 @@ export default function MaintenancePage() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Equipment Name
                 </label>
-                <Input placeholder="Enter equipment name" />
+                <Input 
+                  placeholder="Enter equipment name" 
+                  value={formData.equipmentName}
+                  onChange={(e) => setFormData({...formData, equipmentName: e.target.value})}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Maintenance Type
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
-                  <option>Preventive Maintenance</option>
-                  <option>Corrective Maintenance</option>
-                  <option>Routine Inspection</option>
+                <select 
+                  value={formData.type}
+                  onChange={(e) => setFormData({...formData, type: e.target.value})}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                >
+                  <option value="">Select Type</option>
+                  <option value="Preventive Maintenance">Preventive Maintenance</option>
+                  <option value="Corrective Maintenance">Corrective Maintenance</option>
+                  <option value="Routine Inspection">Routine Inspection</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Location
                 </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                <select 
+                  value={formData.location}
+                  onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                >
+                  <option value="">Select Location</option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.name}>
                       {loc.name}
@@ -271,20 +313,28 @@ export default function MaintenancePage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Scheduled Date
                   </label>
-                  <Input type="date" />
+                  <Input 
+                    type="date" 
+                    value={formData.scheduledDate}
+                    onChange={(e) => setFormData({...formData, scheduledDate: e.target.value})}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Assign To
                   </label>
-                  <Input placeholder="Technician name" />
+                  <Input 
+                    placeholder="Technician name" 
+                    value={formData.assignedTo}
+                    onChange={(e) => setFormData({...formData, assignedTo: e.target.value})}
+                  />
                 </div>
               </div>
               <div className="flex gap-2 pt-4">
                 <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
                   Cancel
                 </Button>
-                <Button onClick={() => setShowModal(false)} className="flex-1">
+                <Button onClick={handleAddTask} className="flex-1">
                   Schedule Task
                 </Button>
               </div>
