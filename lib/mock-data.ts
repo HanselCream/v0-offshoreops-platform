@@ -45,6 +45,17 @@ export interface Transfer {
   approvedBy?: string
   approvalDate?: string
   completedDate?: string
+  acknowledgedBy?: string
+  acknowledgedDate?: string
+  photoUrl?: string
+  signatureUrl?: string
+  notes?: string
+  chainOfCustody?: Array<{
+    timestamp: string
+    action: string
+    user: string
+    location: string
+  }>
 }
 
 export interface MaintenanceTask {
@@ -196,6 +207,14 @@ export const transfers: Transfer[] = [
     ],
     createdBy: 'John Doe',
     createdDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    chainOfCustody: [
+      {
+        timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        action: 'Transfer Request Created',
+        user: 'John Doe',
+        location: 'Warehouse',
+      },
+    ],
   },
   {
     id: '2',
@@ -209,6 +228,20 @@ export const transfers: Transfer[] = [
     createdDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     approvedBy: 'Manager',
     approvalDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    chainOfCustody: [
+      {
+        timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        action: 'Transfer Request Created',
+        user: 'Jane Smith',
+        location: 'Main Plant',
+      },
+      {
+        timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+        action: 'Transfer Approved',
+        user: 'Manager',
+        location: 'Main Plant',
+      },
+    ],
   },
   {
     id: '3',
@@ -223,6 +256,28 @@ export const transfers: Transfer[] = [
     approvedBy: 'Supervisor',
     approvalDate: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     completedDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    acknowledgedBy: 'Receiving Officer',
+    acknowledgedDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    chainOfCustody: [
+      {
+        timestamp: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+        action: 'Transfer Request Created',
+        user: 'Mike Johnson',
+        location: 'Offshore Rig A',
+      },
+      {
+        timestamp: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString(),
+        action: 'Transfer Approved',
+        user: 'Supervisor',
+        location: 'Offshore Rig A',
+      },
+      {
+        timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+        action: 'Transfer Completed & Acknowledged',
+        user: 'Receiving Officer',
+        location: 'Port Facility',
+      },
+    ],
   },
 ]
 
