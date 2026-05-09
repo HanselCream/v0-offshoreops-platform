@@ -177,7 +177,10 @@ export default function TransfersPage() {
                         size="sm" 
                         variant="outline" 
                         className="gap-1"
-                        onClick={() => handleApproveTransfer(transfer.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleApproveTransfer(transfer.id)
+                        }}
                       >
                         <Check className="w-4 h-4" />
                         Approve
@@ -186,7 +189,10 @@ export default function TransfersPage() {
                         size="sm" 
                         variant="outline" 
                         className="gap-1 text-red-600"
-                        onClick={() => handleRejectTransfer(transfer.id)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRejectTransfer(transfer.id)
+                        }}
                       >
                         <X className="w-4 h-4" />
                         Reject
@@ -249,8 +255,8 @@ export default function TransfersPage() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md p-6">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
+          <Card className="w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-slate-900 mb-4">Create New Transfer</h2>
             <div className="space-y-4">
               <div>
