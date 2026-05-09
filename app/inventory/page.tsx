@@ -1,14 +1,27 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Plus, Search, Download } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { inventoryItems, categories, locations } from '@/lib/mock-data'
 
+interface InventoryItem {
+  id: string
+  name: string
+  sku: string
+  category: string
+  location: string
+  quantity: number
+  minStock: number
+  unitPrice: number
+  status: string
+  lastUpdated: string
+}
+
 export default function InventoryPage() {
-  const [items, setItems] = useState(inventoryItems)
+  const [items, setItems] = useState<InventoryItem[]>(inventoryItems)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
@@ -29,6 +42,7 @@ export default function InventoryPage() {
       quantity: parseInt(formData.quantity) || 0,
       minStock: parseInt(formData.minStock) || 0,
       unitPrice: parseFloat(formData.unitPrice) || 0,
+      status: 'in-stock',
       lastUpdated: new Date().toISOString(),
     }
     setItems([...items, newItem])
@@ -74,10 +88,10 @@ export default function InventoryPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Inventory</h1>
-          <p className="text-slate-600 mt-1">Manage items across all locations</p>
+          <p className="text-slate-600">Manage items across all locations</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={handleExport} variant="outline" className="gap-2">
@@ -85,8 +99,8 @@ export default function InventoryPage() {
             <span className="hidden sm:inline">Export</span>
           </Button>
           <Button onClick={() => setShowModal(true)} className="gap-2">
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Item</span>
+            <Plus className="w-5 h-5" />
+            Add Item
           </Button>
         </div>
       </div>
