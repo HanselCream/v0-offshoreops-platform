@@ -11,7 +11,6 @@ const navItems = [
   { href: '/inventory', label: 'Inventory', icon: Package },
   { href: '/transfers', label: 'Transfers', icon: TrendingUp },
   { href: '/maintenance', label: 'Maintenance', icon: Wrench },
-  { href: '/maintenance?tab=ppe', label: 'PPE', icon: Shield, indent: true },
   { href: '/approvals', label: 'Approvals', icon: CheckCircle2 },
   { href: '/reports', label: 'Reports', icon: FileText },
   { href: '/settings', label: 'Settings', icon: Settings },
