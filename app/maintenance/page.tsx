@@ -5,8 +5,7 @@ import { Plus, AlertCircle, Loader } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { fetchMaintenanceTasks, createMaintenanceTask, updateMaintenanceTask, type MaintenanceTask } from '@/lib/supabase'
-
+import { fetchMaintenanceTasks, createMaintenanceTask, updateMaintenanceTask, fetchInventoryItems, type MaintenanceTask } from '@/lib/supabase'
 const statusColors = {
   pending: 'bg-blue-100 text-blue-700',
   'in-progress': 'bg-amber-100 text-amber-700',
@@ -36,13 +35,38 @@ export default function MaintenancePage() {
   })
 
   // Load maintenance tasks
-  useEffect(() => {
+useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true)
         setError(null)
-        const tasksData = await fetchMaintenanceTasks()
-        setTasks(tasksData)
+
+        const [tasksData, inventoryData] = await Promise.all([
+          fetchMaintenanceTasks(),
+          fetchInventoryItems(),
+        ])
+
+        const today = new Date().toISOString().split('T')[0]
+        const existingEquipmentIds = new Set(tasksData.map(t => t.equipmentId))
+
+        const inventoryDueTasks: MaintenanceTask[] = inventoryData
+          .filter(item =>
+            item.maintenanceScheduleDate &&
+            !existingEquipmentIds.has(item.id)
+          )
+          .map(item => ({
+            id: `inv-${item.id}`,
+            equipmentId: item.id,
+            equipmentName: item.name,
+            category: 'equipment' as const,
+            location: item.location,
+            scheduledDate: item.maintenanceScheduleDate!,
+            status: (item.maintenanceScheduleDate! <= today ? 'overdue' : 'pending') as MaintenanceTask['status'],
+            assignedTo: 'Unassigned',
+            notes: `From inventory — SKU: ${item.sku}`,
+          }))
+
+        setTasks([...tasksData, ...inventoryDueTasks])
       } catch (err) {
         console.error('Error loading maintenance tasks:', err)
         setError('Failed to load maintenance tasks. Please try again.')
@@ -52,7 +76,7 @@ export default function MaintenancePage() {
     }
     loadData()
   }, [])
-
+  
   const handleCreateTask = async () => {
     if (!formData.equipmentName || !formData.location || !formData.scheduledDate) {
       alert('Please fill in all required fields')

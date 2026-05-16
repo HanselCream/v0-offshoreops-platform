@@ -1,4 +1,4 @@
-import { InventoryItem, MaintenanceTask } from './mock-data'
+import { type InventoryItem, type MaintenanceTask } from '@/lib/supabase'
 
 export type ItemStatus = 'ok' | 'low-stock' | 'out-of-stock' | 'expiring-soon' | 'expired'
 export type MaintenanceStatus = 'pending' | 'in-progress' | 'completed' | 'overdue' | 'due-soon' | 'due'
@@ -79,12 +79,11 @@ export function createMaintenanceFromInventory(item: InventoryItem, reason: 'exp
     category: 'ppe',
     location: item.location,
     scheduledDate: today,
-    status: reason === 'expired' ? 'overdue' : 'due',
+status: reason === 'expired' ? 'overdue' : 'pending',
     assignedTo: 'Unassigned',
     expiryDate: item.validityDate,
     ppeStatus: reason === 'expired' ? 'expired' : 'valid',
     notes: `Auto-generated: Item ${reason === 'expired' ? 'has expired' : 'maintenance due'} - SKU: ${item.sku}`,
-    lastUpdated: new Date().toISOString(),
   }
 }
 

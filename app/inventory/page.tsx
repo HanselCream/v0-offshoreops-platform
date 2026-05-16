@@ -1,11 +1,10 @@
 'use client'
-
 import { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, Download, AlertCircle, Loader } from 'lucide-react'
+import { Plus, Search, AlertCircle, Loader, Pencil } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { fetchInventoryItems, fetchCategories, fetchLocations, createInventoryItem, type InventoryItem } from '@/lib/supabase'
+import { fetchInventoryItems, fetchCategories, fetchLocations, createInventoryItem, updateInventoryItem, type InventoryItem } from '@/lib/supabase'
 import { calculateInventoryStatus, formatDate } from '@/lib/inventory-utils'
 
 const categoryCodeMap: { [key: string]: string } = {
@@ -27,9 +26,10 @@ export default function InventoryPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
-  const [showModal, setShowModal] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [formData, setFormData] = useState({ 
+const [showModal, setShowModal] = useState(false)
+const [submitting, setSubmitting] = useState(false)
+const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+const [formData, setFormData] = useState({
     name: '', 
     sku: '', 
     category: '', 
@@ -41,7 +41,6 @@ export default function InventoryPage() {
     validityDate: '',
     maintenanceScheduleDate: '',
   })
-
   // Load initial data
   useEffect(() => {
     const loadData = async () => {
@@ -80,6 +79,54 @@ export default function InventoryPage() {
       sku: newCategory ? generateSKU(newCategory) : '',
     })
   }
+
+
+
+// Add edit handler (after handleAddItem)
+const handleEditItem = async () => {
+  if (!editingItem) return
+  try {
+    setSubmitting(true)
+    const updated = await updateInventoryItem(editingItem.id, {
+      name: formData.name,
+      sku: formData.sku,
+      category: formData.category,
+      location: formData.location,
+      quantity: parseInt(formData.quantity) || 0,
+      minStock: parseInt(formData.minStock) || 0,
+      maxThreshold: parseInt(formData.maxThreshold) || 0,
+      unitPrice: parseFloat(formData.unitPrice) || 0,
+      validityDate: formData.validityDate || undefined,
+      maintenanceScheduleDate: formData.maintenanceScheduleDate || undefined,
+    })
+    setItems(items.map(i => i.id === updated.id ? updated : i))
+    setEditingItem(null)
+    setShowModal(false)
+    setFormData({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', maxThreshold: '', unitPrice: '', validityDate: '', maintenanceScheduleDate: '' })
+  } catch (err) {
+    alert('Failed to update item.')
+  } finally {
+    setSubmitting(false)
+  }
+}
+
+// Add edit trigger function
+const openEditModal = (item: InventoryItem) => {
+  setEditingItem(item)
+  setFormData({
+    name: item.name,
+    sku: item.sku,
+    category: item.category,
+    location: item.location,
+    quantity: String(item.quantity),
+    minStock: String(item.minStock),
+    maxThreshold: String(item.maxThreshold || ''),
+    unitPrice: String(item.unitPrice || ''),
+    validityDate: item.validityDate || '',
+    maintenanceScheduleDate: item.maintenanceScheduleDate || '',
+  })
+  setShowModal(true)
+}
 
   const handleAddItem = async () => {
     if (!formData.name || !formData.category || !formData.location || !formData.quantity) {
@@ -213,7 +260,7 @@ export default function InventoryPage() {
       {/* Add Item Modal */}
       {showModal && (
         <Card className="p-6 bg-white border-2 border-primary/30">
-          <h2 className="text-xl font-bold text-slate-900 mb-4">Add New Item</h2>
+          <h2 className="text-xl font-bold text-slate-900 mb-4">{editingItem ? 'Edit Item' : 'Add New Item'}</h2>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -324,12 +371,12 @@ export default function InventoryPage() {
               </div>
             </div>
             <div className="flex gap-2 pt-4">
-              <Button onClick={handleAddItem} disabled={submitting} className="flex-1">
-                {submitting ? 'Creating...' : 'Create Item'}
-              </Button>
-              <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1" disabled={submitting}>
-                Cancel
-              </Button>
+<Button onClick={editingItem ? handleEditItem : handleAddItem} disabled={submitting} className="flex-1">
+  {submitting ? 'Saving...' : editingItem ? 'Save Changes' : 'Create Item'}
+</Button>
+<Button onClick={() => { setShowModal(false); setEditingItem(null) }} variant="outline" className="flex-1" disabled={submitting}>
+  Cancel
+</Button>
             </div>
           </div>
         </Card>
@@ -339,31 +386,18 @@ export default function InventoryPage() {
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-slate-50 border-b border-border">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Item Name
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  SKU
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Location
-                </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
-                  Qty
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Validity Date
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Maintenance Due
-                </th>
-              </tr>
-            </thead>
+<thead className="bg-slate-50 border-b border-border">
+  <tr>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Item Name</th>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">SKU</th>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Location</th>
+    <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">Qty</th>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Status</th>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Validity Date</th>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Maintenance Due</th>
+    <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">Actions</th>
+  </tr>
+</thead>
             <tbody className="divide-y divide-border">
               {filteredItems.map((item) => {
                 const computedStatus = calculateInventoryStatus(item)
@@ -406,6 +440,14 @@ export default function InventoryPage() {
                       ) : (
                         <span className="text-sm text-slate-600">{formatDate(item.maintenanceScheduleDate)}</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => openEditModal(item)}
+                        className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-primary transition-colors"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 )

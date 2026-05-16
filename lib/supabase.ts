@@ -172,7 +172,7 @@ export async function fetchTransfers(): Promise<Transfer[]> {
   const { data, error } = await supabase
     .from('transfers')
     .select('*')
-    .order('createdDate', { ascending: false })
+    .order('created_at', { ascending: false })
 
   if (error) {
     console.error('Error fetching transfers:', error)
@@ -211,10 +211,10 @@ export async function createTransfer(transfer: Omit<Transfer, 'id'>, items: Omit
   return transferData
 }
 
-export async function updateTransferStatus(transferId: string, status: Transfer['status']): Promise<Transfer> {
+export async function updateTransferStatus(transferId: string, updates: Partial<Transfer>): Promise<Transfer> {
   const { data, error } = await supabase
     .from('transfers')
-    .update({ status })
+    .update(updates)
     .eq('id', transferId)
     .select()
     .single()
@@ -337,9 +337,13 @@ export async function fetchLocations(): Promise<Location[]> {
   return data || []
 }
 
+// lib/supabase.ts
 export async function fetchUserRoles(): Promise<UserRole[]> {
   const { data, error } = await supabase.from('user_roles').select('*')
 
-  if (error) throw error
+  if (error) {
+    console.warn('user_roles fetch failed (check RLS):', error)
+    return []   // ← return empty instead of throwing
+  }
   return data || []
 }

@@ -50,12 +50,12 @@ export default function TransfersPage() {
       try {
         setLoading(true)
         setError(null)
-        const [transfersData, itemsData, locationsData, rolesData] = await Promise.all([
-          fetchTransfers(),
-          fetchInventoryItems(),
-          fetchLocations(),
-          fetchUserRoles(),
-        ])
+const [transfersData, itemsData, locationsData, rolesData] = await Promise.all([
+  fetchTransfers(),
+  fetchInventoryItems(),
+  fetchLocations(),
+  fetchUserRoles().catch(() => []),  // ← don't let this kill the page
+])
         setTransfers(transfersData)
         setInventoryItems(itemsData)
         setLocations(locationsData)

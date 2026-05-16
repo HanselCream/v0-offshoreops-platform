@@ -23,7 +23,7 @@ export interface InventoryItem {
   unitPrice: number
   validityDate?: string
   maintenanceScheduleDate?: string
-  status: 'ok' | 'low-stock' | 'out-of-stock'
+status: 'ok' | 'low-stock' | 'out-of-stock' | 'expired' | 'expiring-soon'
   lastUpdated: string
 }
 
