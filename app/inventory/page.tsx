@@ -15,9 +15,20 @@ interface InventoryItem {
   location: string
   quantity: number
   minStock: number
+  maxThreshold: number
   unitPrice: number
-  status: string
+  validityDate?: string
+  maintenanceScheduleDate?: string
+  status: 'ok' | 'low-stock' | 'out-of-stock'
   lastUpdated: string
+}
+
+const categoryCodeMap: { [key: string]: string } = {
+  'PPE': 'PPE',
+  'Tools': 'TOOLS',
+  'Safety Equipment': 'SAFETY',
+  'IT Equipment': 'IT',
+  'Consumable': 'CONS',
 }
 
 export default function InventoryPage() {
@@ -26,14 +37,40 @@ export default function InventoryPage() {
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
   const [showModal, setShowModal] = useState(false)
-  const [formData, setFormData] = useState({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', unitPrice: '' })
+  const [formData, setFormData] = useState({ 
+    name: '', 
+    sku: '', 
+    category: '', 
+    location: '', 
+    quantity: '', 
+    minStock: '', 
+    maxThreshold: '',
+    unitPrice: '',
+    validityDate: '',
+    maintenanceScheduleDate: '',
+  })
+
+  const generateSKU = (category: string) => {
+    const categoryCode = categoryCodeMap[category] || category.substring(0, 3).toUpperCase()
+    const categoryItems = items.filter((item) => item.category === category)
+    const nextNumber = categoryItems.length + 1
+    return `${categoryCode}-${String(nextNumber).padStart(3, '0')}`
+  }
+
+  const handleCategoryChange = (newCategory: string) => {
+    setFormData({
+      ...formData,
+      category: newCategory,
+      sku: newCategory ? generateSKU(newCategory) : '',
+    })
+  }
 
   const handleAddItem = () => {
-    if (!formData.name || !formData.sku || !formData.category || !formData.location) {
+    if (!formData.name || !formData.category || !formData.location || !formData.quantity) {
       alert('Please fill in all required fields')
       return
     }
-    const newItem = {
+    const newItem: InventoryItem = {
       id: (Math.max(...items.map(i => parseInt(i.id))) + 1).toString(),
       name: formData.name,
       sku: formData.sku,
@@ -41,12 +78,15 @@ export default function InventoryPage() {
       location: formData.location,
       quantity: parseInt(formData.quantity) || 0,
       minStock: parseInt(formData.minStock) || 0,
+      maxThreshold: parseInt(formData.maxThreshold) || 0,
       unitPrice: parseFloat(formData.unitPrice) || 0,
-      status: 'in-stock',
+      validityDate: formData.validityDate || undefined,
+      maintenanceScheduleDate: formData.maintenanceScheduleDate || undefined,
+      status: parseInt(formData.quantity) === 0 ? 'out-of-stock' : parseInt(formData.quantity) <= parseInt(formData.minStock) ? 'low-stock' : 'ok',
       lastUpdated: new Date().toISOString(),
     }
     setItems([...items, newItem])
-    setFormData({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', unitPrice: '' })
+    setFormData({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', maxThreshold: '', unitPrice: '', validityDate: '', maintenanceScheduleDate: '' })
     setShowModal(false)
   }
 
@@ -179,36 +219,43 @@ export default function InventoryPage() {
                   SKU
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Category
+                  Status
+                </th>
+                <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
+                  Qty
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Location
+                  Min / Max
                 </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
-                  Quantity
-                </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
-                  Unit Price
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                  Validity Date
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredItems.map((item) => {
-                const isLowStock = item.quantity < item.minStock
+                const statusColor = item.status === 'ok' ? 'bg-green-100 text-green-700' : 
+                                   item.status === 'low-stock' ? 'bg-yellow-100 text-yellow-700' : 
+                                   'bg-red-100 text-red-700'
+                const statusLabel = item.status === 'ok' ? 'OK' :
+                                   item.status === 'low-stock' ? 'Low Stock' : 'Out of Stock'
                 return (
                   <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-sm text-slate-900">{item.name}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{item.sku}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{item.category}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{item.location}</td>
-                    <td className={`px-4 py-3 text-right text-sm font-medium ${
-                      isLowStock ? 'text-red-600' : 'text-slate-900'
-                    }`}>
-                      {item.quantity}
-                      {isLowStock && <span className="ml-2 text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Low Stock</span>}
+                    <td className="px-4 py-3">
+                      <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${statusColor}`}>
+                        {statusLabel}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-sm text-slate-900">
-                      ${item.unitPrice.toFixed(2)}
+                    <td className="px-4 py-3 text-right text-sm font-medium text-slate-900">
+                      {item.quantity}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {item.minStock} / {item.maxThreshold}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {item.validityDate ? new Date(item.validityDate).toLocaleDateString() : '-'}
                     </td>
                   </tr>
                 )
@@ -251,7 +298,7 @@ export default function InventoryPage() {
                   </label>
                   <select 
                     value={formData.category}
-                    onChange={(e) => setFormData({...formData, category: e.target.value})}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
                     className="w-full px-3 py-2 border border-border rounded-md bg-white"
                   >
                     <option value="">Select Category</option>
@@ -283,6 +330,30 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Min Threshold
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.minStock}
+                    onChange={(e) => setFormData({...formData, minStock: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Max Threshold
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.maxThreshold}
+                    onChange={(e) => setFormData({...formData, maxThreshold: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
                     Quantity
                   </label>
                   <Input 
@@ -301,6 +372,28 @@ export default function InventoryPage() {
                     placeholder="0.00" 
                     value={formData.unitPrice}
                     onChange={(e) => setFormData({...formData, unitPrice: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Validity Date
+                  </label>
+                  <Input 
+                    type="date" 
+                    value={formData.validityDate}
+                    onChange={(e) => setFormData({...formData, validityDate: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Maintenance Schedule
+                  </label>
+                  <Input 
+                    type="date" 
+                    value={formData.maintenanceScheduleDate}
+                    onChange={(e) => setFormData({...formData, maintenanceScheduleDate: e.target.value})}
                   />
                 </div>
               </div>

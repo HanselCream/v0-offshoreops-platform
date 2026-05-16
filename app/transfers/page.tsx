@@ -1,539 +1,556 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Plus, Download, Check, X, Upload, FileText, Clock, User, MapPin } from 'lucide-react'
+import { Plus, Search, X, AlertCircle, Check, TrendingUp } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { transfers, locations, inventoryItems } from '@/lib/mock-data'
-
-const statusColors = {
-  pending: 'bg-amber-100 text-amber-700',
-  approved: 'bg-blue-100 text-blue-700',
-  completed: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-}
+import { transfers, inventoryItems, locations } from '@/lib/mock-data'
+import type { Transfer, TransferLineItem } from '@/lib/mock-data'
 
 export default function TransfersPage() {
-  const [transferList, setTransferList] = useState(transfers)
+  const [transferList, setTransferList] = useState<Transfer[]>(transfers)
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedStatus, setSelectedStatus] = useState('all')
-  const [showModal, setShowModal] = useState(false)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [showPhotoModal, setShowPhotoModal] = useState<string | null>(null)
-  const [showSignOffModal, setShowSignOffModal] = useState<string | null>(null)
-  const [formData, setFormData] = useState({ fromLocation: '', toLocation: '', items: [] as Array<{itemId: string, quantity: number}>, notes: '' })
-  const [signOffData, setSignOffData] = useState({ signature: '', acknowledgmentName: '' })
+  const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null)
+  
+  // Form data for creating new transfer
+  const [formData, setFormData] = useState({
+    category: 'ppe' as const,
+    approver1: '',
+    approver2: '',
+    notes: '',
+  })
+  
+  // Line items being added
+  const [lineItems, setLineItems] = useState<TransferLineItem[]>([])
+  const [itemSearch, setItemSearch] = useState('')
+  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null)
 
-  const handleApproveTransfer = (id: string) => {
-    setTransferList(transferList.map(t => {
-      if (t.id === id) {
-        const newTransfer = {...t, status: 'approved' as const, approvedBy: 'Current User', approvalDate: new Date().toISOString().split('T')[0]}
-        if (t.chainOfCustody) {
-          newTransfer.chainOfCustody = [...t.chainOfCustody, {
-            timestamp: new Date().toISOString(),
-            action: 'Transfer Approved',
-            user: 'Current User',
-            location: t.toLocation,
-          }]
-        }
-        return newTransfer
-      }
-      return t
-    }))
+  const searchResults = useMemo(() => {
+    if (!itemSearch.trim()) return []
+    return inventoryItems.filter(item =>
+      item.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
+      item.sku.toLowerCase().includes(itemSearch.toLowerCase())
+    ).slice(0, 8)
+  }, [itemSearch])
+
+  const addLineItem = (itemId: string) => {
+    const item = inventoryItems.find(i => i.id === itemId)
+    if (!item) return
+
+    const newLineItem: TransferLineItem = {
+      id: `li-${Date.now()}`,
+      itemId: item.id,
+      itemName: item.name,
+      category: item.category,
+      quantity: 1,
+      unitType: 'pcs',
+      fromLocation: 'Warehouse',
+      toLocation: 'Main Plant',
+      stockByLocation: {
+        'Warehouse': item.quantity,
+        'Main Plant': 100,
+        'Offshore Rig A': 50,
+        'Port Facility': 30,
+      },
+      status: 'pending',
+      approvalStatus: 'pending',
+    }
+    
+    setLineItems([...lineItems, newLineItem])
+    setItemSearch('')
   }
 
-  const handleRejectTransfer = (id: string) => {
-    setTransferList(transferList.map(t => {
-      if (t.id === id) {
-        const newTransfer = {...t, status: 'rejected' as const}
-        if (t.chainOfCustody) {
-          newTransfer.chainOfCustody = [...t.chainOfCustody, {
-            timestamp: new Date().toISOString(),
-            action: 'Transfer Rejected',
-            user: 'Current User',
-            location: t.fromLocation,
-          }]
-        }
-        return newTransfer
-      }
-      return t
-    }))
+  const updateLineItem = (index: number, updates: Partial<TransferLineItem>) => {
+    const updated = [...lineItems]
+    updated[index] = { ...updated[index], ...updates }
+    setLineItems(updated)
   }
 
-  const handleSignOff = (id: string) => {
-    setTransferList(transferList.map(t => {
-      if (t.id === id) {
-        const newTransfer = {
-          ...t,
-          status: 'completed' as const,
-          acknowledgedBy: signOffData.acknowledgmentName,
-          acknowledgedDate: new Date().toISOString().split('T')[0],
-          signatureUrl: 'digital-signature-' + Date.now(),
-        }
-        if (t.chainOfCustody) {
-          newTransfer.chainOfCustody = [...t.chainOfCustody, {
-            timestamp: new Date().toISOString(),
-            action: 'Transfer Completed & Acknowledged',
-            user: signOffData.acknowledgmentName,
-            location: t.toLocation,
-          }]
-        }
-        return newTransfer
-      }
-      return t
-    }))
-    setShowSignOffModal(null)
-    setSignOffData({ signature: '', acknowledgmentName: '' })
+  const removeLineItem = (index: number) => {
+    setLineItems(lineItems.filter((_, i) => i !== index))
   }
 
   const handleCreateTransfer = () => {
-    if (!formData.fromLocation || !formData.toLocation || formData.items.length === 0) {
-      alert('Please fill in all required fields and select at least one item')
+    if (!formData.approver1 || !formData.approver2 || lineItems.length === 0) {
+      alert('Please fill in all required fields and add at least one item')
       return
     }
-    const newTransfer = {
-      id: (Math.max(...transferList.map(t => parseInt(t.id))) + 1).toString(),
-      fromLocation: formData.fromLocation,
-      toLocation: formData.toLocation,
-      status: 'pending' as const,
-      items: formData.items,
+
+    const newTransfer: Transfer = {
+      id: `TR-${Date.now()}`,
+      status: 'pending-approval1',
+      lineItems: lineItems.map(item => ({ ...item, status: 'pending', approvalStatus: 'pending' })),
+      category: formData.category,
       createdBy: 'Current User',
       createdDate: new Date().toISOString().split('T')[0],
+      approver1: formData.approver1,
+      approver1Status: 'pending',
+      approver2: formData.approver2,
+      approver2Status: 'pending',
       notes: formData.notes,
-      chainOfCustody: [{
-        timestamp: new Date().toISOString(),
-        action: 'Transfer Request Created',
-        user: 'Current User',
-        location: formData.fromLocation,
-      }],
     }
-    setTransferList([...transferList, newTransfer])
-    setFormData({ fromLocation: '', toLocation: '', items: [], notes: '' })
-    setShowModal(false)
+
+    setTransferList([newTransfer, ...transferList])
+    setLineItems([])
+    setFormData({ category: 'ppe', approver1: '', approver2: '', notes: '' })
+    setShowCreateModal(false)
+  }
+
+  const handleApproveLineItem = (transferId: string, lineItemId: string, approverLevel: number) => {
+    setTransferList(transferList.map(t => {
+      if (t.id !== transferId) return t
+      const updated = { ...t }
+      updated.lineItems = updated.lineItems.map(li => {
+        if (li.id !== lineItemId) return li
+        if (approverLevel === 1) {
+          return { ...li, approvalStatus: 'approved' }
+        } else {
+          return { ...li, status: 'approved', approvalStatus: 'approved' }
+        }
+      })
+      
+      // Update transfer status
+      const allApproved = updated.lineItems.every(li => li.approvalStatus === 'approved')
+      if (approverLevel === 1 && allApproved) {
+        updated.approver1Status = 'approved'
+        updated.status = 'pending-approval2'
+      } else if (approverLevel === 2 && allApproved) {
+        updated.approver2Status = 'approved'
+        updated.status = 'completed'
+      }
+      
+      return updated
+    }))
+  }
+
+  const handleRejectLineItem = (transferId: string, lineItemId: string, reason: string) => {
+    setTransferList(transferList.map(t => {
+      if (t.id !== transferId) return t
+      const updated = { ...t }
+      updated.lineItems = updated.lineItems.map(li => {
+        if (li.id !== lineItemId) return li
+        return { ...li, approvalStatus: 'rejected', rejectionReason: reason }
+      })
+      updated.status = 'rejected'
+      return updated
+    }))
   }
 
   const filteredTransfers = useMemo(() => {
-    return transferList.filter((transfer) => {
-      const matchesSearch =
-        transfer.fromLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transfer.toLocation.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = selectedStatus === 'all' || transfer.status === selectedStatus
-
-      return matchesSearch && matchesStatus
+    return transferList.filter(t => {
+      const matchesSearch = t.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.createdBy.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.approver1?.toLowerCase().includes(searchTerm.toLowerCase())
+      return matchesSearch
     })
-  }, [transferList, searchTerm, selectedStatus])
-
-  const handleExport = () => {
-    const csv = [
-      ['ID', 'From Location', 'To Location', 'Status', 'Created By', 'Created Date', 'Items Count', 'Chain of Custody Events'],
-      ...filteredTransfers.map((t) => [
-        t.id,
-        t.fromLocation,
-        t.toLocation,
-        t.status,
-        t.createdBy,
-        t.createdDate,
-        t.items.length.toString(),
-        (t.chainOfCustody?.length || 0).toString(),
-      ]),
-    ]
-      .map((row) => row.join(','))
-      .join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'transfers.csv'
-    a.click()
-  }
+  }, [transferList, searchTerm])
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Transfers</h1>
-          <p className="text-foreground/60 mt-1">Every item movement has a transfer request, approval, photo proof, and digital sign-off. Full chain of custody.</p>
+          <h1 className="text-3xl font-bold text-slate-900">Item Transfers</h1>
+          <p className="text-slate-600">Full chain of custody: transfer request → approval → photo proof → digital sign-off</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={handleExport} variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Export</span>
-          </Button>
-          <Button onClick={() => setShowModal(true)} className="gap-2">
-            <Plus className="w-4 h-4" />
-            New Transfer
-          </Button>
-        </div>
+        <Button onClick={() => setShowCreateModal(true)} className="gap-2">
+          <Plus className="w-5 h-5" />
+          Create Transfer
+        </Button>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="flex-1">
+      <div className="flex gap-2">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
           <Input
-            placeholder="Search transfers..."
+            placeholder="Search by transfer ID, requester, or approver..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full"
+            className="pl-10"
           />
         </div>
-        <select
-          value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
-          className="px-3 py-2 border border-border rounded-md bg-card"
-        >
-          <option value="all">All Status</option>
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="completed">Completed</option>
-          <option value="rejected">Rejected</option>
-        </select>
-      </div>
-
-      {/* Results */}
-      <div className="text-sm text-foreground/60">
-        Showing {filteredTransfers.length} of {transferList.length} transfers
       </div>
 
       {/* Transfers List */}
       <div className="space-y-4">
-        {filteredTransfers.map((transfer) => (
-          <Card key={transfer.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-            <div
-              className="p-6 cursor-pointer hover:bg-muted/30 transition-colors"
-              onClick={() => setExpandedId(expandedId === transfer.id ? null : transfer.id)}
-            >
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-3">
-                    <h3 className="font-semibold text-lg text-foreground">
-                      {transfer.fromLocation} → {transfer.toLocation}
-                    </h3>
-                    <span className={`text-xs font-semibold px-3 py-1 rounded-full ${statusColors[transfer.status]}`}>
-                      {transfer.status.charAt(0).toUpperCase() + transfer.status.slice(1)}
-                    </span>
-                  </div>
-                  <div className="text-sm text-foreground/70">
-                    <p>Created by {transfer.createdBy} on {transfer.createdDate}</p>
-                    {transfer.notes && <p className="text-xs mt-1 text-foreground/60">{transfer.notes}</p>}
+        {filteredTransfers.length === 0 ? (
+          <Card className="p-8 text-center">
+            <p className="text-slate-500">No transfers found</p>
+          </Card>
+        ) : (
+          filteredTransfers.map(transfer => {
+            const approvedCount = transfer.lineItems.filter(li => li.approvalStatus === 'approved').length
+            const rejectedCount = transfer.lineItems.filter(li => li.approvalStatus === 'rejected').length
+            const statusColor = transfer.status === 'completed' ? 'bg-green-50 border-green-200' :
+              transfer.status === 'rejected' ? 'bg-red-50 border-red-200' :
+              'bg-blue-50 border-blue-200'
+            const statusLabel = transfer.status === 'pending-approval1' ? 'Awaiting Approver 1' :
+              transfer.status === 'pending-approval2' ? 'Awaiting Approver 2' :
+              transfer.status === 'completed' ? 'Completed' : 'Rejected'
+
+            return (
+              <Card key={transfer.id} className={`border-l-4 ${statusColor} overflow-hidden`}>
+                {/* Transfer Header */}
+                <div className="p-4 border-b border-border">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-900">{transfer.id}</h3>
+                        <span className="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">
+                          {transfer.category.toUpperCase()}
+                        </span>
+                        <span className={`text-xs px-2 py-1 rounded-full ${
+                          transfer.status === 'completed' ? 'bg-green-200 text-green-700' :
+                          transfer.status === 'rejected' ? 'bg-red-200 text-red-700' :
+                          'bg-blue-200 text-blue-700'
+                        }`}>
+                          {statusLabel}
+                        </span>
+                      </div>
+                      <p className="text-sm text-slate-600 mt-1">
+                        Created by {transfer.createdBy} on {transfer.createdDate}
+                      </p>
+                      {approvedCount > 0 || rejectedCount > 0 ? (
+                        <p className="text-sm font-medium mt-1">
+                          {approvedCount} Approved / {rejectedCount} Rejected
+                        </p>
+                      ) : null}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedTransfer(selectedTransfer?.id === transfer.id ? null : transfer)}
+                    >
+                      {selectedTransfer?.id === transfer.id ? 'Hide Details' : 'View Details'}
+                    </Button>
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <p className="font-semibold text-foreground">{transfer.items.length} items</p>
-                  <p className="text-sm text-foreground/60">{transfer.chainOfCustody?.length || 0} custody events</p>
-                  <div className="flex gap-2 mt-3">
-                    {transfer.status === 'pending' && (
-                      <>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="gap-1"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleApproveTransfer(transfer.id)
-                          }}
-                        >
-                          <Check className="w-4 h-4" />
-                          Approve
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="gap-1 text-red-600"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRejectTransfer(transfer.id)
-                          }}
-                        >
-                          <X className="w-4 h-4" />
-                          Reject
-                        </Button>
-                      </>
-                    )}
-                    {transfer.status === 'approved' && (
-                      <>
-                        <Button 
-                          size="sm" 
-                          variant="outline" 
-                          className="gap-1"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setShowPhotoModal(transfer.id)
-                          }}
-                        >
-                          <Upload className="w-4 h-4" />
-                          Photo
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          className="gap-1 bg-primary hover:bg-primary/90"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setShowSignOffModal(transfer.id)
-                          }}
-                        >
-                          Sign Off
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+                {/* Line Items */}
+                {selectedTransfer?.id === transfer.id && (
+                  <div className="divide-y divide-border">
+                    {transfer.lineItems.map((lineItem, idx) => {
+                      const fromStock = lineItem.stockByLocation[lineItem.fromLocation] || 0
+                      const insufficientStock = fromStock === 0
 
-            {/* Expanded Details */}
-            {expandedId === transfer.id && (
-              <div className="border-t border-border p-6 bg-muted/20 space-y-6">
-                {/* Transfer Items */}
-                <div>
-                  <h4 className="font-semibold text-foreground mb-3">Items in Transfer</h4>
-                  <div className="space-y-2">
-                    {transfer.items.map((item, idx) => {
-                      const itemDetails = inventoryItems.find((inv) => inv.id === item.itemId)
                       return (
-                        <div key={idx} className="flex justify-between items-center p-3 bg-card rounded-lg border border-border">
-                          <span className="text-sm text-foreground">
-                            {itemDetails?.name} ({itemDetails?.sku})
-                          </span>
-                          <span className="font-semibold text-foreground">Qty: {item.quantity}</span>
+                        <div key={lineItem.id} className="p-4">
+                          <div className="grid grid-cols-12 gap-3 items-start">
+                            {/* Item Info */}
+                            <div className="col-span-3">
+                              <p className="font-semibold text-slate-900">{lineItem.itemName}</p>
+                              <p className="text-sm text-slate-600">{lineItem.category}</p>
+                            </div>
+
+                            {/* Stock Info */}
+                            <div className="col-span-2 text-sm">
+                              <p className="text-slate-600">Stock:</p>
+                              {Object.entries(lineItem.stockByLocation).map(([loc, qty]) => (
+                                <p key={loc} className="text-slate-700">
+                                  {loc}: <span className="font-medium">{qty}</span>
+                                </p>
+                              ))}
+                            </div>
+
+                            {/* Quantity & Unit */}
+                            <div className="col-span-2">
+                              <p className="font-semibold text-slate-900">{lineItem.quantity}</p>
+                              <p className="text-sm text-slate-600">{lineItem.unitType}</p>
+                            </div>
+
+                            {/* From → To Locations */}
+                            <div className="col-span-2">
+                              <p className="font-semibold text-slate-900">{lineItem.fromLocation}</p>
+                              <div className="flex items-center gap-2 my-1 text-sm text-slate-600">
+                                <TrendingUp className="w-3 h-3" />
+                              </div>
+                              <p className="font-semibold text-slate-900">{lineItem.toLocation}</p>
+                            </div>
+
+                            {/* Approval Status */}
+                            <div className="col-span-3">
+                              {insufficientStock ? (
+                                <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                                  <AlertCircle className="w-4 h-4" />
+                                  Insufficient stock
+                                </div>
+                              ) : lineItem.approvalStatus === 'pending' ? (
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="flex-1 gap-1"
+                                    onClick={() => handleApproveLineItem(transfer.id, lineItem.id, 1)}
+                                  >
+                                    <Check className="w-4 h-4" />
+                                    Approve
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="flex-1 text-red-600 gap-1"
+                                    onClick={() => {
+                                      const reason = prompt('Enter rejection reason:')
+                                      if (reason) handleRejectLineItem(transfer.id, lineItem.id, reason)
+                                    }}
+                                  >
+                                    <X className="w-4 h-4" />
+                                    Reject
+                                  </Button>
+                                </div>
+                              ) : lineItem.approvalStatus === 'approved' ? (
+                                <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+                                  <Check className="w-4 h-4" />
+                                  Approved
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                                  <X className="w-4 h-4" />
+                                  Rejected
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Received Quantity and Discrepancies (for Approver 2) */}
+                          {lineItem.quantityReceived !== undefined && (
+                            <div className="mt-3 p-3 bg-slate-50 rounded text-sm">
+                              <p className="text-slate-700">
+                                Received: <span className="font-semibold">{lineItem.quantityReceived}</span> / {lineItem.quantity}
+                              </p>
+                              {lineItem.discrepancy && (
+                                <p className="text-slate-700 mt-1">
+                                  Note: {lineItem.discrepancy}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Rejection Reason */}
+                          {lineItem.rejectionReason && (
+                            <div className="mt-3 p-3 bg-red-50 rounded text-sm text-red-700">
+                              Rejection Reason: {lineItem.rejectionReason}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
                   </div>
-                </div>
-
-                {/* Approval Details */}
-                {transfer.approvedBy && (
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <div>
-                      <p className="text-sm text-foreground/60">Approved by</p>
-                      <p className="font-semibold text-foreground">{transfer.approvedBy}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-foreground/60">Approval Date</p>
-                      <p className="font-semibold text-foreground">{transfer.approvalDate}</p>
-                    </div>
-                  </div>
                 )}
 
-                {/* Digital Sign-Off */}
-                {transfer.acknowledgedBy && (
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div>
-                      <p className="text-sm text-foreground/60">Acknowledged by</p>
-                      <p className="font-semibold text-foreground">{transfer.acknowledgedBy}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-foreground/60">Acknowledgment Date</p>
-                      <p className="font-semibold text-foreground">{transfer.acknowledgedDate}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Chain of Custody Timeline */}
-                <div>
-                  <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-primary" />
-                    Chain of Custody
-                  </h4>
-                  <div className="space-y-3">
-                    {transfer.chainOfCustody?.map((event, idx) => (
-                      <div key={idx} className="flex gap-4 p-3 bg-card rounded-lg border border-border">
-                        <div className="flex flex-col items-center">
-                          <div className="w-3 h-3 rounded-full bg-primary mt-2"></div>
-                          {idx < (transfer.chainOfCustody?.length || 0) - 1 && (
-                            <div className="w-0.5 h-12 bg-border mt-2"></div>
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <p className="font-semibold text-foreground text-sm">{event.action}</p>
-                          </div>
-                          <div className="text-xs text-foreground/60 space-y-1">
-                            <p className="flex items-center gap-1">
-                              <User className="w-3 h-3" /> {event.user}
-                            </p>
-                            <p className="flex items-center gap-1">
-                              <MapPin className="w-3 h-3" /> {event.location}
-                            </p>
-                            <p>{new Date(event.timestamp).toLocaleString()}</p>
-                          </div>
-                        </div>
+                {/* Transfer Summary */}
+                {selectedTransfer?.id === transfer.id && (
+                  <div className="p-4 bg-slate-50 border-t border-border">
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <p className="text-slate-600">Approver 1</p>
+                        <p className="font-semibold text-slate-900">{transfer.approver1}</p>
+                        <p className={`text-xs mt-1 ${transfer.approver1Status === 'approved' ? 'text-green-700' : transfer.approver1Status === 'rejected' ? 'text-red-700' : 'text-slate-600'}`}>
+                          {transfer.approver1Status === 'approved' ? '✓ Approved' : transfer.approver1Status === 'pending' ? 'Pending' : 'Rejected'}
+                        </p>
                       </div>
-                    ))}
+                      <div>
+                        <p className="text-slate-600">Approver 2</p>
+                        <p className="font-semibold text-slate-900">{transfer.approver2}</p>
+                        <p className={`text-xs mt-1 ${transfer.approver2Status === 'approved' ? 'text-green-700' : transfer.approver2Status === 'rejected' ? 'text-red-700' : 'text-slate-600'}`}>
+                          {transfer.approver2Status === 'approved' ? '✓ Approved' : transfer.approver2Status === 'pending' ? 'Pending' : 'Rejected'}
+                        </p>
+                      </div>
+                      {transfer.notes && (
+                        <div>
+                          <p className="text-slate-600">Notes</p>
+                          <p className="font-semibold text-slate-900">{transfer.notes}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
-            )}
-          </Card>
-        ))}
+                )}
+              </Card>
+            )
+          })
+        )}
       </div>
 
       {/* Create Transfer Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
-          <Card className="w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-2xl font-bold text-foreground mb-4">Create Transfer Request</h2>
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowCreateModal(false)}>
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-slate-900">Create Transfer Request</h2>
+              <button onClick={() => setShowCreateModal(false)} className="text-slate-500 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
             <div className="space-y-4">
+              {/* Transfer Category */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Transfer Category
+                </label>
+                <select
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
+                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                >
+                  <option value="ppe">PPE</option>
+                  <option value="tools">Tools</option>
+                  <option value="it-equipment">IT Equipment</option>
+                  <option value="consumable">Consumable</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              {/* Approvers */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">
-                    From Location
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Approver 1 (Request Approver)
                   </label>
-                  <select 
-                    value={formData.fromLocation}
-                    onChange={(e) => setFormData({...formData, fromLocation: e.target.value})}
-                    className="w-full px-3 py-2 border border-border rounded-md bg-card"
-                  >
-                    <option value="">Select From Location</option>
-                    {locations.map((loc) => (
-                      <option key={loc.id} value={loc.name}>
-                        {loc.name}
-                      </option>
-                    ))}
-                  </select>
+                  <Input
+                    placeholder="Manager name"
+                    value={formData.approver1}
+                    onChange={(e) => setFormData({ ...formData, approver1: e.target.value })}
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">
-                    To Location
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Approver 2 (Receiver)
                   </label>
-                  <select 
-                    value={formData.toLocation}
-                    onChange={(e) => setFormData({...formData, toLocation: e.target.value})}
-                    className="w-full px-3 py-2 border border-border rounded-md bg-card"
-                  >
-                    <option value="">Select To Location</option>
-                    {locations.map((loc) => (
-                      <option key={loc.id} value={loc.name}>
-                        {loc.name}
-                      </option>
-                    ))}
-                  </select>
+                  <Input
+                    placeholder="Receiving officer"
+                    value={formData.approver2}
+                    onChange={(e) => setFormData({ ...formData, approver2: e.target.value })}
+                  />
                 </div>
               </div>
 
+              {/* Notes */}
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Select Items for Transfer
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Transfer Notes
                 </label>
-                <div className="border border-border rounded-md p-2 bg-card max-h-40 overflow-y-auto">
-                  {inventoryItems.map((item) => (
-                    <label key={item.id} className="flex items-center gap-2 p-2 hover:bg-muted rounded">
-                      <input 
-                        type="checkbox" 
-                        className="rounded"
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setFormData({...formData, items: [...formData.items, {itemId: item.id, quantity: 1}]})
-                          } else {
-                            setFormData({...formData, items: formData.items.filter(i => i.itemId !== item.id)})
-                          }
-                        }}
-                      />
-                      <span className="text-sm text-foreground">{item.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
-                  Notes (Optional)
-                </label>
-                <Input 
-                  placeholder="Add any additional notes..." 
+                <textarea
+                  placeholder="Add any notes..."
                   value={formData.notes}
-                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  className="w-full px-3 py-2 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  rows={3}
                 />
               </div>
 
-              <div className="flex gap-2 pt-4">
-                <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
+              {/* Item Search */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Add Items to Transfer
+                </label>
+                <div className="relative">
+                  <Input
+                    placeholder="Search items by name or SKU..."
+                    value={itemSearch}
+                    onChange={(e) => setItemSearch(e.target.value)}
+                    className="w-full"
+                  />
+                  {itemSearch && searchResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 border border-border rounded-md bg-white shadow-lg z-10">
+                      {searchResults.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => addLineItem(item.id)}
+                          className="w-full text-left px-3 py-2 hover:bg-slate-100 text-sm"
+                        >
+                          <p className="font-semibold text-slate-900">{item.name}</p>
+                          <p className="text-slate-600">{item.sku} • {item.category} • Stock: {item.quantity}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Added Line Items */}
+              {lineItems.length > 0 && (
+                <div className="space-y-3 mt-4 pt-4 border-t border-border">
+                  <h3 className="font-semibold text-slate-900">Items to Transfer ({lineItems.length})</h3>
+                  {lineItems.map((item, idx) => (
+                    <Card key={item.id} className="p-3 bg-slate-50">
+                      <div className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-3">
+                          <p className="font-semibold text-slate-900 text-sm">{item.itemName}</p>
+                        </div>
+                        <div className="col-span-1">
+                          <label className="text-xs text-slate-600">Qty</label>
+                          <Input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => updateLineItem(idx, { quantity: parseInt(e.target.value) || 1 })}
+                            className="text-sm h-8"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <label className="text-xs text-slate-600">Unit</label>
+                          <select
+                            value={item.unitType}
+                            onChange={(e) => updateLineItem(idx, { unitType: e.target.value as any })}
+                            className="w-full px-2 py-1 border border-border rounded text-xs h-8"
+                          >
+                            <option value="pcs">pcs</option>
+                            <option value="sets">sets</option>
+                            <option value="boxes">boxes</option>
+                            <option value="kg">kg</option>
+                            <option value="liters">liters</option>
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs text-slate-600">From</label>
+                          <select
+                            value={item.fromLocation}
+                            onChange={(e) => updateLineItem(idx, { fromLocation: e.target.value })}
+                            className="w-full px-2 py-1 border border-border rounded text-xs h-8"
+                          >
+                            {locations.map((loc) => (
+                              <option key={loc.id} value={loc.name}>{loc.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-xs text-slate-600">To</label>
+                          <select
+                            value={item.toLocation}
+                            onChange={(e) => updateLineItem(idx, { toLocation: e.target.value })}
+                            className="w-full px-2 py-1 border border-border rounded text-xs h-8"
+                          >
+                            {locations.map((loc) => (
+                              <option key={loc.id} value={loc.name}>{loc.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => removeLineItem(idx)}
+                            className="w-full text-red-600 h-8"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-4 border-t border-border">
+                <Button onClick={() => setShowCreateModal(false)} variant="outline" className="flex-1">
                   Cancel
                 </Button>
                 <Button onClick={handleCreateTransfer} className="flex-1">
                   Create Transfer
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Photo Upload Modal */}
-      {showPhotoModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowPhotoModal(null)}>
-          <Card className="w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-bold text-foreground mb-4">Upload Transfer Photo</h2>
-            <p className="text-sm text-foreground/60 mb-4">Upload photographic proof of the transferred items at the destination location.</p>
-            <div className="border-2 border-dashed border-primary rounded-lg p-8 text-center mb-4 hover:bg-muted/30 transition-colors">
-              <Upload className="w-8 h-8 text-primary mx-auto mb-2" />
-              <p className="text-sm text-foreground font-medium">Click to upload or drag and drop</p>
-              <p className="text-xs text-foreground/60">PNG, JPG, GIF up to 10MB</p>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={() => setShowPhotoModal(null)} variant="outline" className="flex-1">
-                Cancel
-              </Button>
-              <Button onClick={() => {
-                setShowPhotoModal(null)
-                alert('Photo uploaded successfully!')
-              }} className="flex-1">
-                Upload
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Digital Sign-Off Modal */}
-      {showSignOffModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowSignOffModal(null)}>
-          <Card className="w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-bold text-foreground mb-4">Digital Sign-Off</h2>
-            <p className="text-sm text-foreground/60 mb-4">Complete the transfer by acknowledging receipt at the destination location.</p>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
-                  Receiving Officer Name
-                </label>
-                <Input 
-                  placeholder="Enter full name" 
-                  value={signOffData.acknowledgmentName}
-                  onChange={(e) => setSignOffData({...signOffData, acknowledgmentName: e.target.value})}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Digital Signature
-                </label>
-                <div className="border-2 border-dashed border-primary rounded-lg p-6 text-center bg-muted/20">
-                  <p className="text-sm text-foreground/60">Digital signature area</p>
-                  <p className="text-xs text-foreground/50 mt-2">(Signature capture integrated)</p>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-xs text-blue-700 font-medium">
-                  ✓ This will complete the chain of custody and mark the transfer as delivered.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <Button onClick={() => setShowSignOffModal(null)} variant="outline" className="flex-1">
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={() => handleSignOff(showSignOffModal)}
-                  disabled={!signOffData.acknowledgmentName}
-                  className="flex-1"
-                >
-                  Sign Off & Complete
                 </Button>
               </div>
             </div>
