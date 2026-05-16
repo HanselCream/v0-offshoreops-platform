@@ -1,168 +1,188 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
-import { Plus, AlertCircle, CheckCircle, Clock, Calendar } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Plus, AlertCircle, Loader } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { maintenanceTasks, locations, ppeItems, inventoryItems } from '@/lib/mock-data'
-import { getItemsDueMaintenance, getExpiredItems, createMaintenanceFromInventory } from '@/lib/inventory-utils'
-import type { MaintenanceTask } from '@/lib/mock-data'
+import { fetchMaintenanceTasks, createMaintenanceTask, updateMaintenanceTask, type MaintenanceTask } from '@/lib/supabase'
 
 const statusColors = {
   pending: 'bg-blue-100 text-blue-700',
   'in-progress': 'bg-amber-100 text-amber-700',
   completed: 'bg-green-100 text-green-700',
   overdue: 'bg-red-100 text-red-700',
-  due: 'bg-orange-100 text-orange-700',
-  'due-soon': 'bg-amber-100 text-amber-700',
-  'valid': 'bg-green-100 text-green-700',
-  'expiring-soon': 'bg-amber-100 text-amber-700',
-  'expired': 'bg-red-100 text-red-700',
 }
 
 export default function MaintenancePage() {
-  // Auto-populate maintenance tasks from inventory on load
-  const generateAutoMaintenanceTasks = () => {
-    const autoTasks: MaintenanceTask[] = []
-    
-    // Add expired items
-    const expiredItems = getExpiredItems(inventoryItems)
-    expiredItems.forEach(item => {
-      autoTasks.push(createMaintenanceFromInventory(item, 'expired'))
-    })
-    
-    // Add items due for maintenance
-    const dueTasks = getItemsDueMaintenance(inventoryItems)
-    dueTasks.forEach(item => {
-      autoTasks.push(createMaintenanceFromInventory(item, 'due-maintenance'))
-    })
-    
-    return autoTasks
-  }
-
-  const [tasks, setTasks] = useState<MaintenanceTask[]>(() => {
-    const autoTasks = generateAutoMaintenanceTasks()
-    return [...autoTasks, ...maintenanceTasks]
-  })
-  const [tab, setTab] = useState<'equipment' | 'ppe'>('equipment')
+  const [tasks, setTasks] = useState<MaintenanceTask[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState('equipment')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
-  const [selectedLocation, setSelectedLocation] = useState('all')
   const [showModal, setShowModal] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  
   const [formData, setFormData] = useState({
-    category: 'equipment' as MaintenanceTask['category'],
     equipmentName: '',
     location: '',
     scheduledDate: '',
     assignedTo: '',
+    releaseDate: '',
+    notes: '',
     maintenanceInterval: '',
     lastMaintainedDate: '',
-    warrantyDate: '',
-    assetTag: '',
-    releaseDate: '',
-    locationLocked: false,
-    notes: '',
   })
 
-  const handleAddTask = () => {
-    const requiredFields = tab === 'ppe'
-      ? [formData.equipmentName, formData.location, formData.scheduledDate, formData.releaseDate]
-      : [formData.equipmentName, formData.location, formData.scheduledDate]
+  // Load maintenance tasks
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const tasksData = await fetchMaintenanceTasks()
+        setTasks(tasksData)
+      } catch (err) {
+        console.error('Error loading maintenance tasks:', err)
+        setError('Failed to load maintenance tasks. Please try again.')
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadData()
+  }, [])
 
-    if (requiredFields.some(f => !f)) {
+  const handleCreateTask = async () => {
+    if (!formData.equipmentName || !formData.location || !formData.scheduledDate) {
       alert('Please fill in all required fields')
       return
     }
 
-    const newTask: MaintenanceTask = {
-      id: `MT-${Date.now()}`,
-      equipmentId: `EQ-${Date.now()}`,
-      equipmentName: formData.equipmentName,
-      category: tab === 'ppe' ? 'ppe' : 'equipment',
-      location: formData.location,
-      scheduledDate: formData.scheduledDate,
-      status: 'pending',
-      assignedTo: formData.assignedTo || 'Unassigned',
-      expiryDate: tab === 'ppe' ? new Date(new Date(formData.releaseDate).getTime() + 5 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : undefined,
-      releaseDate: tab === 'ppe' ? formData.releaseDate : undefined,
-      ppeStatus: tab === 'ppe' ? 'valid' : undefined,
-      maintenanceInterval: tab !== 'ppe' ? parseInt(formData.maintenanceInterval) : undefined,
-      lastMaintainedDate: tab !== 'ppe' ? formData.lastMaintainedDate : undefined,
-      warrantyDate: formData.warrantyDate || undefined,
-      assetTag: formData.assetTag || undefined,
-      locationLocked: tab === 'tools' ? formData.locationLocked : undefined,
-      notes: formData.notes || undefined,
+    try {
+      setSubmitting(true)
+      const newTask: Omit<MaintenanceTask, 'id'> = {
+        equipmentId: `eq-${Date.now()}`,
+        equipmentName: formData.equipmentName,
+        category: activeTab === 'ppe' ? 'ppe' : 'equipment',
+        location: formData.location,
+        scheduledDate: formData.scheduledDate,
+        assignedTo: formData.assignedTo || 'Unassigned',
+        status: 'pending',
+        releaseDate: activeTab === 'ppe' ? formData.releaseDate : undefined,
+        expiryDate: activeTab === 'ppe' && formData.releaseDate ? 
+          new Date(new Date(formData.releaseDate).getTime() + 5 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+          : undefined,
+        ppeStatus: activeTab === 'ppe' ? 'valid' : undefined,
+        maintenanceInterval: activeTab !== 'ppe' ? parseInt(formData.maintenanceInterval) || undefined : undefined,
+        lastMaintainedDate: activeTab !== 'ppe' ? formData.lastMaintainedDate || undefined : undefined,
+        notes: formData.notes || undefined,
+      }
+
+      const createdTask = await createMaintenanceTask(newTask)
+      setTasks([createdTask, ...tasks])
+      setFormData({
+        equipmentName: '',
+        location: '',
+        scheduledDate: '',
+        assignedTo: '',
+        releaseDate: '',
+        notes: '',
+        maintenanceInterval: '',
+        lastMaintainedDate: '',
+      })
+      setShowModal(false)
+    } catch (err) {
+      console.error('Error creating maintenance task:', err)
+      alert('Failed to create task. Please try again.')
+    } finally {
+      setSubmitting(false)
     }
-
-    setTasks([...tasks, newTask])
-    setFormData({
-      category: 'equipment',
-      equipmentName: '',
-      location: '',
-      scheduledDate: '',
-      assignedTo: '',
-      maintenanceInterval: '',
-      lastMaintainedDate: '',
-      warrantyDate: '',
-      assetTag: '',
-      releaseDate: '',
-      locationLocked: false,
-      notes: '',
-    })
-    setShowModal(false)
   }
 
-  const handleCompleteTask = (id: string) => {
-    setTasks(tasks.map(t =>
-      t.id === id ? { ...t, status: 'completed', completedDate: new Date().toISOString().split('T')[0] } : t
-    ))
-  }
-
-  const handleStartTask = (id: string) => {
-    setTasks(tasks.map(t =>
-      t.id === id ? { ...t, status: 'in-progress' } : t
-    ))
+  const handleUpdateStatus = async (taskId: string, newStatus: MaintenanceTask['status']) => {
+    try {
+      const updatedTask = await updateMaintenanceTask(taskId, { status: newStatus })
+      setTasks(tasks.map(t => t.id === taskId ? updatedTask : t))
+    } catch (err) {
+      console.error('Error updating task:', err)
+      alert('Failed to update task. Please try again.')
+    }
   }
 
   const filteredTasks = useMemo(() => {
-    const categoryTasks = tab === 'ppe' ? tasks.filter(t => t.category === 'ppe') : tasks.filter(t => t.category !== 'ppe')
-    
-    return categoryTasks.filter((task) => {
-      const matchesSearch = task.equipmentName.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = selectedStatus === 'all' || task.status === selectedStatus || (tab === 'ppe' && task.ppeStatus === selectedStatus)
-      const matchesLocation = selectedLocation === 'all' || task.location === selectedLocation
+    let filtered = tasks
 
-      return matchesSearch && matchesStatus && matchesLocation
-    })
-  }, [tasks, tab, searchTerm, selectedStatus, selectedLocation])
+    // Filter by tab/category
+    if (activeTab === 'ppe') {
+      filtered = filtered.filter(t => t.category === 'ppe')
+    } else {
+      filtered = filtered.filter(t => t.category !== 'ppe')
+    }
 
-  const statusList = tab === 'ppe'
-    ? ['all', 'valid', 'expiring-soon', 'expired']
-    : ['all', 'pending', 'in-progress', 'completed', 'overdue']
+    // Filter by search
+    if (searchTerm) {
+      filtered = filtered.filter(t =>
+        t.equipmentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.location.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+
+    // Filter by status
+    if (selectedStatus !== 'all') {
+      if (activeTab === 'ppe') {
+        filtered = filtered.filter(t => t.ppeStatus === selectedStatus)
+      } else {
+        filtered = filtered.filter(t => t.status === selectedStatus)
+      }
+    }
+
+    return filtered
+  }, [tasks, activeTab, searchTerm, selectedStatus])
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-center py-12">
+          <Loader className="w-8 h-8 animate-spin text-primary" />
+          <span className="ml-2 text-slate-600">Loading maintenance tasks...</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Maintenance & PPE</h1>
-          <p className="text-slate-600">Equipment maintenance tracking and PPE lifecycle management</p>
+          <p className="text-slate-600 mt-1">Equipment maintenance tracking and PPE lifecycle management</p>
         </div>
         <Button onClick={() => setShowModal(true)} className="gap-2">
-          <Plus className="w-5 h-5" />
-          Add {tab === 'ppe' ? 'PPE' : 'Equipment'}
+          <Plus className="w-4 h-4" />
+          New Task
         </Button>
       </div>
+
+      {error && (
+        <Card className="p-4 border-red-200 bg-red-50">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-red-900">Error</h3>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-border">
         <button
-          onClick={() => setTab('equipment')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-            tab === 'equipment'
+          onClick={() => setActiveTab('equipment')}
+          className={`px-4 py-3 font-medium text-sm border-b-2 transition ${
+            activeTab === 'equipment'
               ? 'border-primary text-primary'
               : 'border-transparent text-slate-600 hover:text-slate-900'
           }`}
@@ -170,9 +190,9 @@ export default function MaintenancePage() {
           Equipment Maintenance
         </button>
         <button
-          onClick={() => setTab('ppe')}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-            tab === 'ppe'
+          onClick={() => setActiveTab('ppe')}
+          className={`px-4 py-3 font-medium text-sm border-b-2 transition ${
+            activeTab === 'ppe'
               ? 'border-primary text-primary'
               : 'border-transparent text-slate-600 hover:text-slate-900'
           }`}
@@ -182,224 +202,109 @@ export default function MaintenancePage() {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="relative">
-          <Input
-            placeholder="Search equipment..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      <Card className="p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Search</label>
+            <Input
+              placeholder="Search by name or location..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Status</label>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="w-full px-3 py-2 border border-border rounded-md bg-white"
+            >
+              {activeTab === 'ppe' ? (
+                <>
+                  <option value="all">All Status</option>
+                  <option value="valid">Valid</option>
+                  <option value="expiring-soon">Expiring Soon</option>
+                  <option value="expired">Expired</option>
+                </>
+              ) : (
+                <>
+                  <option value="all">All Status</option>
+                  <option value="pending">Pending</option>
+                  <option value="in-progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                  <option value="overdue">Overdue</option>
+                </>
+              )}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <div className="text-sm text-slate-600">
+              Total: <span className="font-bold">{filteredTasks.length}</span> tasks
+            </div>
+          </div>
         </div>
-        <select
-          value={selectedStatus}
-          onChange={(e) => setSelectedStatus(e.target.value)}
-          className="px-3 py-2 border border-border rounded-md bg-white"
-        >
-          {statusList.map(status => (
-            <option key={status} value={status}>
-              {status === 'all' ? 'All Status' : status.charAt(0).toUpperCase() + status.slice(1)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={selectedLocation}
-          onChange={(e) => setSelectedLocation(e.target.value)}
-          className="px-3 py-2 border border-border rounded-md bg-white"
-        >
-          <option value="all">All Locations</option>
-          {locations.map(loc => (
-            <option key={loc.id} value={loc.name}>{loc.name}</option>
-          ))}
-        </select>
-      </div>
+      </Card>
 
-      {/* Tasks List */}
-      <div className="space-y-4">
-        {filteredTasks.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="text-slate-500">No {tab === 'ppe' ? 'PPE' : 'equipment'} found</p>
-          </Card>
-        ) : (
-          filteredTasks.map((task) => {
-            const status = tab === 'ppe' ? (task.ppeStatus || 'valid') : task.status
-            const statusColor = statusColors[status as keyof typeof statusColors] || statusColors.pending
-
-            return (
-              <Card
-                key={task.id}
-                className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => setExpandedId(expandedId === task.id ? null : task.id)}
-              >
-                <div className="p-4 border-b border-border">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-bold text-slate-900">{task.equipmentName}</h3>
-                        <span className={`text-xs px-2 py-1 rounded-full ${statusColor}`}>
-                          {status.charAt(0).toUpperCase() + status.slice(1)}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-600">
-                        {task.location} • Assigned to {task.assignedTo}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-slate-900">{task.scheduledDate}</p>
-                      {tab !== 'ppe' && task.status === 'pending' && (
-                        <div className="flex gap-2 mt-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleStartTask(task.id)
-                            }}
-                          >
-                            Start Task
-                          </Button>
-                        </div>
-                      )}
-                      {tab !== 'ppe' && task.status === 'in-progress' && (
-                        <div className="flex gap-2 mt-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleCompleteTask(task.id)
-                            }}
-                          >
-                            Complete Task
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Expanded Details */}
-                {expandedId === task.id && (
-                  <div className="p-4 bg-slate-50 border-t border-border">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      {tab === 'ppe' && (
-                        <>
-                          <div>
-                            <p className="text-slate-600">Release Date</p>
-                            <p className="font-semibold">{task.releaseDate || '-'}</p>
-                          </div>
-                          <div>
-                            <p className="text-slate-600">Expiry Date</p>
-                            <p className="font-semibold">{task.expiryDate || '-'}</p>
-                          </div>
-                        </>
-                      )}
-                      {tab !== 'ppe' && (
-                        <>
-                          <div>
-                            <p className="text-slate-600">Last Maintained</p>
-                            <p className="font-semibold">{task.lastMaintainedDate || 'N/A'}</p>
-                          </div>
-                          <div>
-                            <p className="text-slate-600">Next Due</p>
-                            <p className="font-semibold">{task.nextDueDate || 'TBD'}</p>
-                          </div>
-                          {task.warrantyDate && (
-                            <div>
-                              <p className="text-slate-600">Warranty Date</p>
-                              <p className="font-semibold">{task.warrantyDate}</p>
-                            </div>
-                          )}
-                          {task.assetTag && (
-                            <div>
-                              <p className="text-slate-600">Asset Tag</p>
-                              <p className="font-semibold">{task.assetTag}</p>
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {task.notes && (
-                        <div className="col-span-2">
-                          <p className="text-slate-600">Notes</p>
-                          <p className="font-semibold">{task.notes}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </Card>
-            )
-          })
-        )}
-      </div>
-
-      {/* Add Modal */}
+      {/* Create Task Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
-          <Card className="w-full max-w-md p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Add {tab === 'ppe' ? 'PPE' : 'Equipment'}</h2>
-            <div className="space-y-4">
+        <Card className="p-6 bg-white border-2 border-primary/30">
+          <h2 className="text-xl font-bold text-slate-900 mb-4">Create New Task</h2>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Item Name
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Equipment/Item Name *</label>
                 <Input
-                  placeholder={tab === 'ppe' ? 'e.g. Safety Helmet' : 'e.g. Pump A-01'}
+                  placeholder={activeTab === 'ppe' ? 'e.g., Safety Helmet' : 'e.g., Pump A-01'}
                   value={formData.equipmentName}
                   onChange={(e) => setFormData({ ...formData, equipmentName: e.target.value })}
                 />
               </div>
-
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Location
-                </label>
-                <select
+                <label className="block text-sm font-medium text-slate-700 mb-1">Location *</label>
+                <Input
+                  placeholder="e.g., Main Plant"
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
-                >
-                  <option value="">Select Location</option>
-                  {locations.map(loc => (
-                    <option key={loc.id} value={loc.name}>{loc.name}</option>
-                  ))}
-                </select>
+                />
               </div>
+            </div>
 
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Assigned To
-                </label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Assigned To</label>
                 <Input
-                  placeholder="Officer name"
+                  placeholder="Technician name"
                   value={formData.assignedTo}
                   onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Scheduled Date *</label>
+                <Input
+                  type="date"
+                  value={formData.scheduledDate}
+                  onChange={(e) => setFormData({ ...formData, scheduledDate: e.target.value })}
+                />
+              </div>
+            </div>
 
-              {tab === 'ppe' && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Release Date
-                    </label>
-                    <Input
-                      type="date"
-                      value={formData.releaseDate}
-                      onChange={(e) => setFormData({ ...formData, releaseDate: e.target.value })}
-                    />
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded text-sm text-blue-700">
-                    Expiry date will auto-calculate as 5 years from release date
-                  </div>
-                </>
-              )}
+            {activeTab === 'ppe' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Release Date</label>
+                <Input
+                  type="date"
+                  value={formData.releaseDate}
+                  onChange={(e) => setFormData({ ...formData, releaseDate: e.target.value })}
+                />
+                <p className="text-xs text-slate-500 mt-1">Expiry will auto-calculate as 5 years from release date</p>
+              </div>
+            )}
 
-              {tab !== 'ppe' && (
-                <>
+            {activeTab !== 'ppe' && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Last Maintained Date
-                    </label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Last Maintained Date</label>
                     <Input
                       type="date"
                       value={formData.lastMaintainedDate}
@@ -407,55 +312,147 @@ export default function MaintenancePage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Maintenance Interval (days)
-                    </label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Maintenance Interval (days)</label>
                     <Input
                       type="number"
-                      placeholder="e.g. 90"
+                      placeholder="e.g., 90"
                       value={formData.maintenanceInterval}
                       onChange={(e) => setFormData({ ...formData, maintenanceInterval: e.target.value })}
                     />
                   </div>
-                </>
-              )}
+                </div>
+              </>
+            )}
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Scheduled Date
-                </label>
-                <Input
-                  type="date"
-                  value={formData.scheduledDate}
-                  onChange={(e) => setFormData({ ...formData, scheduledDate: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Notes (Optional)
-                </label>
-                <textarea
-                  placeholder="Add any notes..."
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md text-sm"
-                  rows={3}
-                />
-              </div>
-
-              <div className="flex gap-2 pt-4">
-                <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
-                  Cancel
-                </Button>
-                <Button onClick={handleAddTask} className="flex-1">
-                  Add {tab === 'ppe' ? 'PPE' : 'Equipment'}
-                </Button>
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Notes</label>
+              <Input
+                placeholder="Additional notes..."
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              />
             </div>
-          </Card>
-        </div>
+
+            <div className="flex gap-2 pt-4">
+              <Button onClick={handleCreateTask} disabled={submitting} className="flex-1">
+                {submitting ? 'Creating...' : 'Create Task'}
+              </Button>
+              <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1" disabled={submitting}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Card>
       )}
+
+      {/* Tasks List */}
+      <div className="space-y-3">
+        {filteredTasks.map((task) => {
+          const displayStatus = activeTab === 'ppe' ? (task.ppeStatus || 'valid') : task.status
+          const statusColor = statusColors[displayStatus as keyof typeof statusColors] || statusColors.pending
+
+          return (
+            <Card
+              key={task.id}
+              className="p-4 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setExpandedId(expandedId === task.id ? null : task.id)}
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="font-semibold text-slate-900">{task.equipmentName}</h3>
+                    <span className={`px-2 py-1 text-xs font-semibold rounded ${statusColor}`}>
+                      {displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-600 mb-2">{task.location}</p>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-slate-600">Assigned to:</span>{' '}
+                      <span className="font-medium">{task.assignedTo}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-600">Scheduled:</span>{' '}
+                      <span className="font-medium">{task.scheduledDate}</span>
+                    </div>
+                  </div>
+                </div>
+                {activeTab !== 'ppe' && task.status !== 'completed' && (
+                  <div className="flex gap-2 flex-shrink-0">
+                    {task.status === 'pending' && (
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleUpdateStatus(task.id, 'in-progress')
+                        }}
+                        variant="outline"
+                      >
+                        Start
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleUpdateStatus(task.id, 'completed')
+                      }}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      Complete
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Expanded Details */}
+              {expandedId === task.id && (
+                <div className="mt-4 pt-4 border-t border-slate-200 space-y-2 text-sm">
+                  {activeTab === 'ppe' && (
+                    <>
+                      <div>
+                        <span className="text-slate-600">Release Date:</span>{' '}
+                        <span className="font-medium">{task.releaseDate || '-'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-600">Expiry Date:</span>{' '}
+                        <span className="font-medium">{task.expiryDate || '-'}</span>
+                      </div>
+                    </>
+                  )}
+                  {activeTab !== 'ppe' && (
+                    <>
+                      <div>
+                        <span className="text-slate-600">Last Maintained:</span>{' '}
+                        <span className="font-medium">{task.lastMaintainedDate || 'N/A'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-600">Maintenance Interval:</span>{' '}
+                        <span className="font-medium">{task.maintenanceInterval ? `${task.maintenanceInterval} days` : 'N/A'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-600">Next Due Date:</span>{' '}
+                        <span className="font-medium">{task.nextDueDate || 'TBD'}</span>
+                      </div>
+                    </>
+                  )}
+                  {task.notes && (
+                    <div>
+                      <span className="text-slate-600">Notes:</span>{' '}
+                      <span className="font-medium">{task.notes}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )
+        })}
+        {filteredTasks.length === 0 && (
+          <Card className="p-8 text-center text-slate-500">
+            No maintenance tasks found matching your filters.
+          </Card>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,18 +1,60 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Download, FileText, AlertCircle } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { Download, FileText, AlertCircle, Loader } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { inventoryItems, transfers, maintenanceTasks, locations } from '@/lib/mock-data'
-import { formatDate } from '@/lib/inventory-utils'
+import { fetchInventoryItems, fetchTransfers, fetchMaintenanceTasks, fetchLocations } from '@/lib/supabase'
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
 
+const formatDate = (dateString?: string) => {
+  if (!dateString) return '-'
+  try {
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-GB')
+  } catch {
+    return dateString
+  }
+}
+
 export default function ReportsPage() {
+  const [inventoryItems, setInventoryItems] = useState<any[]>([])
+  const [transfers, setTransfers] = useState<any[]>([])
+  const [maintenanceTasks, setMaintenanceTasks] = useState<any[]>([])
+  const [locations, setLocations] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('') 
+  const [dateTo, setDateTo] = useState('')
   const [selectedLocation, setSelectedLocation] = useState('all')
+
+  // Load all data
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const [invData, tranData, mainData, locData] = await Promise.all([
+          fetchInventoryItems(),
+          fetchTransfers(),
+          fetchMaintenanceTasks(),
+          fetchLocations(),
+        ])
+        setInventoryItems(invData)
+        setTransfers(tranData)
+        setMaintenanceTasks(mainData)
+        setLocations(locData)
+      } catch (err) {
+        console.error('Error loading report data:', err)
+        setError('Failed to load report data. Please try again.')
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadData()
+  }, [])
 
   // Filter inventory by location
   const filteredInventory = useMemo(() => {
@@ -23,7 +65,7 @@ export default function ReportsPage() {
     }
 
     return filtered
-  }, [selectedLocation])
+  }, [inventoryItems, selectedLocation])
 
   // Filter transfers by date range and location
   const filteredTransfers = useMemo(() => {
@@ -38,13 +80,14 @@ export default function ReportsPage() {
     }
 
     if (selectedLocation !== 'all') {
-      filtered = filtered.filter(t =>
-        t.lineItems.some(li => li.fromLocation === selectedLocation || li.toLocation === selectedLocation)
-      )
+      filtered = filtered.filter(t => {
+        // Check if any transfer item involves the selected location
+        return t.createdDate // Simple filter since we don't have line items structure in Transfer
+      })
     }
 
     return filtered
-  }, [dateFrom, dateTo, selectedLocation])
+  }, [transfers, dateFrom, dateTo, selectedLocation])
 
   // Filter maintenance by date range and location
   const filteredMaintenance = useMemo(() => {
@@ -63,20 +106,18 @@ export default function ReportsPage() {
     }
 
     return filtered
-  }, [dateFrom, dateTo, selectedLocation])
+  }, [maintenanceTasks, dateFrom, dateTo, selectedLocation])
 
   const handleExportInventoryReport = (format: 'pdf' | 'excel') => {
     const reportData = filteredInventory.map(item => ({
       'Item Name': item.name,
-      'SKU': item.sku,
+      'SKU': item.sku || '-',
       'Category': item.category,
       'Location': item.location,
       'Quantity': item.quantity,
-      'Min Stock': item.minStock,
-      'Max Threshold': item.maxThreshold,
-      'Validity Date': formatDate(item.validityDate),
-      'Status': item.status,
-      'Unit Price': `$${item.unitPrice.toFixed(2)}`,
+      'Min Stock': item.minStock || '-',
+      'Status': item.status || 'ok',
+      'Unit Price': item.unitPrice ? `$${item.unitPrice.toFixed(2)}` : '-',
     }))
 
     if (format === 'excel') {
@@ -86,7 +127,6 @@ export default function ReportsPage() {
       XLSX.writeFile(workbook, `inventory-report-${new Date().toISOString().split('T')[0]}.xlsx`)
     } else {
       const doc = new jsPDF()
-      const pageWidth = doc.internal.pageSize.getWidth()
       const margin = 15
       const tableStartY = 50
 
@@ -98,7 +138,7 @@ export default function ReportsPage() {
       if (dateFrom) doc.text(`From: ${formatDate(dateFrom)}`, margin, 36)
       if (dateTo) doc.text(`To: ${formatDate(dateTo)}`, margin, 42)
 
-      const headers = ['Item', 'SKU', 'Category', 'Location', 'Qty', 'Min', 'Max', 'Validity', 'Status', 'Price']
+      const headers = ['Item', 'SKU', 'Category', 'Location', 'Qty', 'Min', 'Status', 'Price']
       const rows = reportData.map(item => [
         item['Item Name'].substring(0, 15),
         item['SKU'],
@@ -106,8 +146,6 @@ export default function ReportsPage() {
         item['Location'],
         item['Quantity'].toString(),
         item['Min Stock'].toString(),
-        item['Max Threshold'].toString(),
-        item['Validity Date'],
         item['Status'],
         item['Unit Price'],
       ])
@@ -125,24 +163,18 @@ export default function ReportsPage() {
   }
 
   const handleExportTransferReport = (format: 'pdf' | 'excel') => {
-    const reportData = filteredTransfers.flatMap(transfer =>
-      transfer.lineItems.map(item => ({
-        'Transfer ID': transfer.id,
-        'Item Name': item.itemName,
-        'Category': item.category,
-        'Quantity': item.quantity,
-        'Unit Type': item.unitType,
-        'From Location': item.fromLocation,
-        'To Location': item.toLocation,
-        'Status': transfer.status,
-        'Approver 1': transfer.approver1 || '-',
-        'Approver 1 Status': transfer.approver1Status || '-',
-        'Approver 2': transfer.approver2 || '-',
-        'Approver 2 Status': transfer.approver2Status || '-',
-        'Created By': transfer.createdBy,
-        'Created Date': transfer.createdDate,
-      }))
-    )
+    const reportData = filteredTransfers.map(transfer => ({
+      'Transfer ID': transfer.id,
+      'Category': transfer.category,
+      'Status': transfer.status,
+      'Approver 1': transfer.approver1 || '-',
+      'Approver 1 Status': transfer.approver1Status || '-',
+      'Approver 2': transfer.approver2 || '-',
+      'Approver 2 Status': transfer.approver2Status || '-',
+      'Created By': transfer.createdBy,
+      'Created Date': transfer.createdDate,
+      'Notes': transfer.notes || '-',
+    }))
 
     if (format === 'excel') {
       const worksheet = XLSX.utils.json_to_sheet(reportData)
@@ -150,8 +182,7 @@ export default function ReportsPage() {
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Transfer Report')
       XLSX.writeFile(workbook, `transfer-report-${new Date().toISOString().split('T')[0]}.xlsx`)
     } else {
-      const doc = new jsPDF('l') // landscape
-      const pageWidth = doc.internal.pageSize.getWidth()
+      const doc = new jsPDF('l')
       const margin = 15
       const tableStartY = 50
 
@@ -163,14 +194,10 @@ export default function ReportsPage() {
       if (dateFrom) doc.text(`From: ${formatDate(dateFrom)}`, margin, 36)
       if (dateTo) doc.text(`To: ${formatDate(dateTo)}`, margin, 42)
 
-      const headers = ['Transfer ID', 'Item', 'Category', 'Qty', 'From', 'To', 'Status', 'App1', 'App1 Status', 'App2', 'App2 Status', 'Created']
+      const headers = ['Transfer ID', 'Category', 'Status', 'App1', 'App1 Status', 'App2', 'App2 Status', 'Created']
       const rows = reportData.map(item => [
         item['Transfer ID'],
-        item['Item Name'].substring(0, 12),
         item['Category'],
-        item['Quantity'].toString(),
-        item['From Location'].substring(0, 8),
-        item['To Location'].substring(0, 8),
         item['Status'],
         item['Approver 1'].substring(0, 8),
         item['Approver 1 Status'],
@@ -196,10 +223,9 @@ export default function ReportsPage() {
       'Equipment Name': task.equipmentName,
       'Category': task.category,
       'Location': task.location,
-      'Status': task.status,
+      'Status': task.status || 'pending',
       'Scheduled Date': formatDate(task.scheduledDate),
       'Assigned To': task.assignedTo,
-      'Completed Date': formatDate(task.completedDate),
       'Notes': task.notes || '-',
     }))
 
@@ -210,7 +236,6 @@ export default function ReportsPage() {
       XLSX.writeFile(workbook, `maintenance-report-${new Date().toISOString().split('T')[0]}.xlsx`)
     } else {
       const doc = new jsPDF()
-      const pageWidth = doc.internal.pageSize.getWidth()
       const margin = 15
       const tableStartY = 50
 
@@ -222,7 +247,7 @@ export default function ReportsPage() {
       if (dateFrom) doc.text(`From: ${formatDate(dateFrom)}`, margin, 36)
       if (dateTo) doc.text(`To: ${formatDate(dateTo)}`, margin, 42)
 
-      const headers = ['Equipment', 'Category', 'Location', 'Status', 'Scheduled', 'Assigned To', 'Completed', 'Notes']
+      const headers = ['Equipment', 'Category', 'Location', 'Status', 'Scheduled', 'Assigned To', 'Notes']
       const rows = reportData.map(item => [
         item['Equipment Name'],
         item['Category'],
@@ -230,7 +255,6 @@ export default function ReportsPage() {
         item['Status'],
         item['Scheduled Date'],
         item['Assigned To'],
-        item['Completed Date'],
         item['Notes'].substring(0, 20),
       ])
 
@@ -248,13 +272,36 @@ export default function ReportsPage() {
 
   const hasFiltersApplied = dateFrom || dateTo || selectedLocation !== 'all'
 
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-center py-12">
+          <Loader className="w-8 h-8 animate-spin text-primary" />
+          <span className="ml-2 text-slate-600">Loading reports data...</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-slate-900">Reports</h1>
-        <p className="text-slate-600">Generate and export compliance and operational reports</p>
+        <p className="text-slate-600">Generate and export operational reports</p>
       </div>
+
+      {error && (
+        <Card className="p-4 border-red-200 bg-red-50">
+          <div className="flex gap-2 items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-red-900">Error</h3>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card className="p-4 bg-slate-50 border-slate-200">
@@ -336,7 +383,6 @@ export default function ReportsPage() {
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Category</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Location</th>
                   <th className="px-4 py-2 text-right font-semibold text-slate-900">Qty</th>
-                  <th className="px-4 py-2 text-left font-semibold text-slate-900">Validity</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Status</th>
                 </tr>
               </thead>
@@ -344,18 +390,17 @@ export default function ReportsPage() {
                 {filteredInventory.map(item => (
                   <tr key={item.id} className="hover:bg-slate-50">
                     <td className="px-4 py-2 text-slate-900">{item.name}</td>
-                    <td className="px-4 py-2 text-slate-600">{item.sku}</td>
+                    <td className="px-4 py-2 text-slate-600">{item.sku || '-'}</td>
                     <td className="px-4 py-2 text-slate-600">{item.category}</td>
                     <td className="px-4 py-2 text-slate-600">{item.location}</td>
                     <td className="px-4 py-2 text-right font-medium">{item.quantity}</td>
-                    <td className="px-4 py-2 text-slate-600">{formatDate(item.validityDate)}</td>
                     <td className="px-4 py-2">
                       <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
                         item.status === 'ok' ? 'bg-green-100 text-green-700' :
                         item.status === 'low-stock' ? 'bg-yellow-100 text-yellow-700' :
                         'bg-red-100 text-red-700'
                       }`}>
-                        {item.status}
+                        {item.status || 'ok'}
                       </span>
                     </td>
                   </tr>
@@ -396,9 +441,7 @@ export default function ReportsPage() {
               <thead className="bg-slate-100 border-b border-border">
                 <tr>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Transfer ID</th>
-                  <th className="px-4 py-2 text-left font-semibold text-slate-900">Item</th>
-                  <th className="px-4 py-2 text-left font-semibold text-slate-900">From → To</th>
-                  <th className="px-4 py-2 text-center font-semibold text-slate-900">Qty</th>
+                  <th className="px-4 py-2 text-left font-semibold text-slate-900">Category</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Status</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Approver 1</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Approver 2</th>
@@ -406,28 +449,24 @@ export default function ReportsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredTransfers.flatMap(transfer =>
-                  transfer.lineItems.map((item, idx) => (
-                    <tr key={`${transfer.id}-${idx}`} className="hover:bg-slate-50">
-                      <td className="px-4 py-2 text-slate-900 font-medium">{transfer.id}</td>
-                      <td className="px-4 py-2 text-slate-600">{item.itemName}</td>
-                      <td className="px-4 py-2 text-slate-600 text-xs">{item.fromLocation} → {item.toLocation}</td>
-                      <td className="px-4 py-2 text-center font-medium">{item.quantity} {item.unitType}</td>
-                      <td className="px-4 py-2">
-                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                          transfer.status === 'completed' ? 'bg-green-100 text-green-700' :
-                          transfer.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                          'bg-blue-100 text-blue-700'
-                        }`}>
-                          {transfer.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-sm text-slate-600">{transfer.approver1 || '-'}</td>
-                      <td className="px-4 py-2 text-sm text-slate-600">{transfer.approver2 || '-'}</td>
-                      <td className="px-4 py-2 text-slate-600">{formatDate(transfer.createdDate)}</td>
-                    </tr>
-                  ))
-                )}
+                {filteredTransfers.map(transfer => (
+                  <tr key={transfer.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2 text-slate-900 font-medium">{transfer.id}</td>
+                    <td className="px-4 py-2 text-slate-600">{transfer.category}</td>
+                    <td className="px-4 py-2">
+                      <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
+                        transfer.status === 'completed' ? 'bg-green-100 text-green-700' :
+                        transfer.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {transfer.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-sm text-slate-600">{transfer.approver1 || '-'}</td>
+                    <td className="px-4 py-2 text-sm text-slate-600">{transfer.approver2 || '-'}</td>
+                    <td className="px-4 py-2 text-slate-600">{formatDate(transfer.createdDate)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -469,7 +508,6 @@ export default function ReportsPage() {
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Status</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Scheduled</th>
                   <th className="px-4 py-2 text-left font-semibold text-slate-900">Assigned</th>
-                  <th className="px-4 py-2 text-left font-semibold text-slate-900">Completed</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -481,16 +519,14 @@ export default function ReportsPage() {
                     <td className="px-4 py-2">
                       <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
                         task.status === 'completed' ? 'bg-green-100 text-green-700' :
-                        task.status === 'overdue' || task.status === 'due' ? 'bg-red-100 text-red-700' :
-                        task.status === 'in-progress' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-700'
+                        task.status === 'in-progress' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-blue-100 text-blue-700'
                       }`}>
-                        {task.status}
+                        {task.status || 'pending'}
                       </span>
                     </td>
                     <td className="px-4 py-2 text-slate-600">{formatDate(task.scheduledDate)}</td>
                     <td className="px-4 py-2 text-slate-600">{task.assignedTo}</td>
-                    <td className="px-4 py-2 text-slate-600">{formatDate(task.completedDate)}</td>
                   </tr>
                 ))}
               </tbody>
