@@ -127,7 +127,7 @@ export interface UserRole {
 // API functions for Inventory
 export async function fetchInventoryItems(): Promise<InventoryItem[]> {
   const { data, error } = await supabase
-    .from('inventory_items')
+    .from('inventory')
     .select('*')
     .order('created_at', { ascending: false })
 
@@ -140,7 +140,7 @@ export async function fetchInventoryItems(): Promise<InventoryItem[]> {
 
 export async function createInventoryItem(item: Omit<InventoryItem, 'id' | 'lastUpdated'>): Promise<InventoryItem> {
   const { data, error } = await supabase
-    .from('inventory_items')
+    .from('inventory')
     .insert([{ ...item, lastUpdated: new Date().toISOString() }])
     .select()
     .single()
@@ -154,7 +154,7 @@ export async function createInventoryItem(item: Omit<InventoryItem, 'id' | 'last
 
 export async function updateInventoryItem(id: string, updates: Partial<InventoryItem>): Promise<InventoryItem> {
   const { data, error } = await supabase
-    .from('inventory_items')
+    .from('inventory')
     .update({ ...updates, lastUpdated: new Date().toISOString() })
     .eq('id', id)
     .select()
@@ -184,7 +184,7 @@ export async function fetchTransfers(): Promise<Transfer[]> {
 export async function fetchTransferDetails(transferId: string): Promise<{ transfer: Transfer; items: TransferItem[] }> {
   const [transferRes, itemsRes] = await Promise.all([
     supabase.from('transfers').select('*').eq('id', transferId).single(),
-    supabase.from('transfer_items').select('*').eq('transfer_id', transferId),
+    supabase.from('transfer_line_items').select('*').eq('transfer_id', transferId),
   ])
 
   if (transferRes.error) throw transferRes.error
@@ -204,7 +204,7 @@ export async function createTransfer(transfer: Omit<Transfer, 'id'>, items: Omit
 
   // Insert transfer items
   const itemsToInsert = items.map((item) => ({ ...item, transfer_id: transferData.id }))
-  const { error: itemsError } = await supabase.from('transfer_items').insert(itemsToInsert)
+  const { error: itemsError } = await supabase.from('transfer_line_items').insert(itemsToInsert)
 
   if (itemsError) throw itemsError
 
@@ -225,7 +225,7 @@ export async function updateTransferStatus(transferId: string, status: Transfer[
 
 export async function approveTransferLine(itemId: string, approverLevel: 1 | 2, approverId: string): Promise<TransferItem> {
   const { data, error } = await supabase
-    .from('transfer_items')
+    .from('transfer_line_items')
     .update({ [`approver${approverLevel}Status`]: 'approved' })
     .eq('id', itemId)
     .select()
@@ -237,7 +237,7 @@ export async function approveTransferLine(itemId: string, approverLevel: 1 | 2, 
 
 export async function rejectTransferLine(itemId: string, reason: string): Promise<TransferItem> {
   const { data, error } = await supabase
-    .from('transfer_items')
+    .from('transfer_line_items')
     .update({ approvalStatus: 'rejected', rejectionReason: reason })
     .eq('id', itemId)
     .select()
@@ -250,9 +250,9 @@ export async function rejectTransferLine(itemId: string, reason: string): Promis
 // API functions for Maintenance
 export async function fetchMaintenanceTasks(): Promise<MaintenanceTask[]> {
   const { data, error } = await supabase
-    .from('maintenance_tasks')
+    .from('maintenance')
     .select('*')
-    .order('scheduledDate', { ascending: true })
+    .order('scheduled_date', { ascending: true })
 
   if (error) {
     console.error('Error fetching maintenance tasks:', error)
@@ -263,7 +263,7 @@ export async function fetchMaintenanceTasks(): Promise<MaintenanceTask[]> {
 
 export async function createMaintenanceTask(task: Omit<MaintenanceTask, 'id'>): Promise<MaintenanceTask> {
   const { data, error } = await supabase
-    .from('maintenance_tasks')
+    .from('maintenance')
     .insert([task])
     .select()
     .single()
@@ -274,7 +274,7 @@ export async function createMaintenanceTask(task: Omit<MaintenanceTask, 'id'>): 
 
 export async function updateMaintenanceTask(id: string, updates: Partial<MaintenanceTask>): Promise<MaintenanceTask> {
   const { data, error } = await supabase
-    .from('maintenance_tasks')
+    .from('maintenance')
     .update(updates)
     .eq('id', id)
     .select()
@@ -289,10 +289,10 @@ export async function fetchApprovals(approverId?: string): Promise<Approval[]> {
   let query = supabase.from('approvals').select('*')
 
   if (approverId) {
-    query = query.eq('approverId', approverId)
+    query = query.eq('approver_id', approverId)
   }
 
-  const { data, error } = await query.order('submittedDate', { ascending: false })
+  const { data, error } = await query.order('created_at', { ascending: false })
 
   if (error) throw error
   return data || []
@@ -301,7 +301,7 @@ export async function fetchApprovals(approverId?: string): Promise<Approval[]> {
 export async function approveRequest(approvalId: string, approverId: string): Promise<Approval> {
   const { data, error } = await supabase
     .from('approvals')
-    .update({ status: 'approved', approvedDate: new Date().toISOString() })
+    .update({ status: 'approved', approval_date: new Date().toISOString() })
     .eq('id', approvalId)
     .select()
     .single()
@@ -313,7 +313,7 @@ export async function approveRequest(approvalId: string, approverId: string): Pr
 export async function rejectRequest(approvalId: string, reason: string): Promise<Approval> {
   const { data, error } = await supabase
     .from('approvals')
-    .update({ status: 'rejected', rejectionReason: reason })
+    .update({ status: 'rejected', rejection_reason: reason })
     .eq('id', approvalId)
     .select()
     .single()
