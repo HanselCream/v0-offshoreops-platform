@@ -1,258 +1,520 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Plus, Download, Check, X } from 'lucide-react'
+import { Plus, X, AlertCircle, ArrowRight, Check, MapPin } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { transfers, locations, inventoryItems } from '@/lib/mock-data'
+import { transfers, inventoryItems, locations, categories } from '@/lib/mock-data'
+import { calculateInventoryStatus } from '@/lib/inventory-utils'
+import type { Transfer, TransferLineItem } from '@/lib/mock-data'
 
-const statusColors = {
-  pending: 'bg-amber-100 text-amber-700',
-  approved: 'bg-blue-100 text-blue-700',
-  completed: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
+interface ApproverOption {
+  id: string
+  name: string
+  role: string
 }
 
+const approverOptions: ApproverOption[] = [
+  { id: '1', name: 'Manager A', role: 'Transfer Approver' },
+  { id: '2', name: 'Manager B', role: 'Transfer Approver' },
+  { id: '3', name: 'Supervisor', role: 'Transfer Approver' },
+  { id: '4', name: 'Receiving Officer A', role: 'Receiver' },
+  { id: '5', name: 'Receiving Officer B', role: 'Receiver' },
+  { id: '6', name: 'Field Supervisor', role: 'Receiver' },
+]
+
 export default function TransfersPage() {
+  const [transferList, setTransferList] = useState<Transfer[]>(transfers)
+  const [showCreateModal, setShowCreateModal] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedStatus, setSelectedStatus] = useState('all')
-  const [showModal, setShowModal] = useState(false)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null)
+
+  // Form state
+  const [formData, setFormData] = useState({
+    category: 'ppe' as const,
+    approver1: '',
+    approver1Name: '',
+    approver2: '',
+    approver2Name: '',
+    notes: '',
+  })
+
+  const [lineItems, setLineItems] = useState<TransferLineItem[]>([])
+  const [itemSearch, setItemSearch] = useState('')
+  const [showApprover1Dropdown, setShowApprover1Dropdown] = useState(false)
+  const [showApprover2Dropdown, setShowApprover2Dropdown] = useState(false)
+
+  const searchResults = useMemo(() => {
+    if (!itemSearch.trim()) return []
+    return inventoryItems
+      .filter((item) =>
+        item.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
+        item.sku.toLowerCase().includes(itemSearch.toLowerCase())
+      )
+      .slice(0, 8)
+  }, [itemSearch])
+
+  const addLineItem = (itemId: string) => {
+    const item = inventoryItems.find((i) => i.id === itemId)
+    if (!item) return
+
+    const newLineItem: TransferLineItem = {
+      id: `li-${Date.now()}`,
+      itemId: item.id,
+      itemName: item.name,
+      category: item.category,
+      quantity: 1,
+      unitType: 'pcs',
+      fromLocation: locations[0]?.name || 'Warehouse',
+      toLocation: locations[1]?.name || 'Main Plant',
+      stockByLocation: {
+        [item.location]: item.quantity,
+        [locations[1]?.name || 'Main Plant']: 0,
+      },
+      status: 'pending',
+      approvalStatus: 'pending',
+    }
+
+    setLineItems([...lineItems, newLineItem])
+    setItemSearch('')
+  }
+
+  const updateLineItem = (index: number, updates: Partial<TransferLineItem>) => {
+    const updated = [...lineItems]
+    updated[index] = { ...updated[index], ...updates }
+    setLineItems(updated)
+  }
+
+  const removeLineItem = (index: number) => {
+    setLineItems(lineItems.filter((_, i) => i !== index))
+  }
+
+  const handleCreateTransfer = () => {
+    const errors: string[] = []
+
+    if (!formData.approver1 || !formData.approver1Name) {
+      errors.push('Please assign both approvers before submitting')
+    }
+    if (!formData.approver2 || !formData.approver2Name) {
+      errors.push('Please assign both approvers before submitting')
+    }
+    if (lineItems.length === 0) {
+      errors.push('Please add at least one item to transfer')
+    }
+
+    // Check stock availability
+    lineItems.forEach((item, idx) => {
+      const stock = item.stockByLocation[item.fromLocation] || 0
+      if (stock === 0) {
+        errors.push(`Line ${idx + 1}: No stock available at "${item.fromLocation}"`)
+      }
+      if (item.quantity > stock) {
+        errors.push(`Line ${idx + 1}: Only ${stock} units available, but ${item.quantity} requested`)
+      }
+    })
+
+    if (errors.length > 0) {
+      alert(errors.join('\n'))
+      return
+    }
+
+    const newTransfer: Transfer = {
+      id: `t-${Date.now()}`,
+      status: 'pending-approval1',
+      lineItems,
+      category: formData.category,
+      createdBy: 'Current User',
+      createdDate: new Date().toISOString().split('T')[0],
+      approver1: formData.approver1Name,
+      approver1Status: 'pending',
+      approver2: formData.approver2Name,
+      approver2Status: 'pending',
+      notes: formData.notes,
+    }
+
+    setTransferList([newTransfer, ...transferList])
+    resetForm()
+    setShowCreateModal(false)
+  }
+
+  const resetForm = () => {
+    setFormData({ category: 'ppe', approver1: '', approver1Name: '', approver2: '', approver2Name: '', notes: '' })
+    setLineItems([])
+    setItemSearch('')
+  }
+
+  const handleApprover1Select = (approver: ApproverOption) => {
+    setFormData({
+      ...formData,
+      approver1: approver.id,
+      approver1Name: approver.name,
+    })
+    setShowApprover1Dropdown(false)
+  }
+
+  const handleApprover2Select = (approver: ApproverOption) => {
+    setFormData({
+      ...formData,
+      approver2: approver.id,
+      approver2Name: approver.name,
+    })
+    setShowApprover2Dropdown(false)
+  }
 
   const filteredTransfers = useMemo(() => {
-    return transfers.filter((transfer) => {
-      const matchesSearch =
-        transfer.fromLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transfer.toLocation.toLowerCase().includes(searchTerm.toLowerCase())
-      const matchesStatus = selectedStatus === 'all' || transfer.status === selectedStatus
+    return transferList.filter(
+      (t) =>
+        t.lineItems.some((li) =>
+          li.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          li.fromLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          li.toLocation.toLowerCase().includes(searchTerm.toLowerCase())
+        ) ||
+        t.createdBy.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+  }, [searchTerm, transferList])
 
-      return matchesSearch && matchesStatus
-    })
-  }, [searchTerm, selectedStatus])
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      'pending-approval1': 'bg-blue-50 border-blue-200',
+      'pending-approval2': 'bg-yellow-50 border-yellow-200',
+      'completed': 'bg-green-50 border-green-200',
+      'rejected': 'bg-red-50 border-red-200',
+    }
+    return colors[status] || 'bg-gray-50 border-gray-200'
+  }
 
-  const handleExport = () => {
-    const csv = [
-      ['ID', 'From Location', 'To Location', 'Status', 'Created By', 'Created Date', 'Items Count'],
-      ...filteredTransfers.map((t) => [
-        t.id,
-        t.fromLocation,
-        t.toLocation,
-        t.status,
-        t.createdBy,
-        t.createdDate,
-        t.items.length.toString(),
-      ]),
-    ]
-      .map((row) => row.join(','))
-      .join('\n')
-
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'transfers.csv'
-    a.click()
+  const getStatusBadgeColor = (status: string) => {
+    const colors: Record<string, string> = {
+      'pending-approval1': 'bg-blue-100 text-blue-800',
+      'pending-approval2': 'bg-yellow-100 text-yellow-800',
+      'completed': 'bg-green-100 text-green-800',
+      'rejected': 'bg-red-100 text-red-800',
+    }
+    return colors[status] || 'bg-gray-100 text-gray-800'
   }
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Transfers</h1>
-          <p className="text-slate-600 mt-1">Track item transfers between locations</p>
+          <h1 className="text-3xl font-bold text-slate-900">Transfer Requests</h1>
+          <p className="text-slate-600">Track item movements with full chain of custody</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={handleExport} variant="outline" className="gap-2">
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Export</span>
-          </Button>
-          <Button onClick={() => setShowModal(true)} className="gap-2">
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">New Transfer</span>
-          </Button>
-        </div>
+        <Button onClick={() => setShowCreateModal(true)} className="gap-2">
+          <Plus className="w-5 h-5" />
+          Create Transfer
+        </Button>
       </div>
 
-      {/* Filters */}
-      <Card className="p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Search Location
-            </label>
-            <Input
-              placeholder="From or to location..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Status
-            </label>
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="w-full px-3 py-2 border border-border rounded-md bg-white"
-            >
-              <option value="all">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="completed">Completed</option>
-              <option value="rejected">Rejected</option>
-            </select>
-          </div>
-        </div>
-      </Card>
-
-      {/* Results */}
-      <div className="text-sm text-slate-600">
-        Showing {filteredTransfers.length} of {transfers.length} transfers
+      {/* Search */}
+      <div className="relative">
+        <Input
+          placeholder="Search by item, location, or requester..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10"
+        />
       </div>
 
-      {/* Transfers List */}
+      {/* Transfer List */}
       <div className="space-y-4">
-        {filteredTransfers.map((transfer) => (
-          <Card key={transfer.id} className="overflow-hidden">
-            <div
-              className="p-4 cursor-pointer hover:bg-slate-50 transition-colors"
-              onClick={() => setExpandedId(expandedId === transfer.id ? null : transfer.id)}
+        {filteredTransfers.length === 0 ? (
+          <Card className="p-8 text-center text-slate-600">No transfers found</Card>
+        ) : (
+          filteredTransfers.map((transfer) => (
+            <Card
+              key={transfer.id}
+              className={`p-4 border-2 cursor-pointer transition ${getStatusColor(transfer.status)}`}
+              onClick={() => setSelectedTransfer(transfer)}
             >
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="font-semibold text-slate-900">
-                      {transfer.fromLocation} → {transfer.toLocation}
-                    </h3>
-                    <span className={`text-xs font-semibold px-3 py-1 rounded-full ${statusColors[transfer.status]}`}>
-                      {transfer.status.charAt(0).toUpperCase() + transfer.status.slice(1)}
-                    </span>
-                  </div>
-                  <div className="text-sm text-slate-600">
-                    <p>Created by {transfer.createdBy} on {transfer.createdDate}</p>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Transfer {transfer.id}</h3>
+                  <p className="text-sm text-slate-600">Created by {transfer.createdBy} on {transfer.createdDate}</p>
+                </div>
+                <span className={`inline-block px-3 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(transfer.status)}`}>
+                  {transfer.status === 'pending-approval1' && 'Awaiting Approver 1'}
+                  {transfer.status === 'pending-approval2' && 'Awaiting Approver 2'}
+                  {transfer.status === 'completed' && 'Completed'}
+                  {transfer.status === 'rejected' && 'Rejected'}
+                </span>
+              </div>
+
+              {/* Shipment Tracker */}
+              <div className="bg-white/50 rounded-lg p-3 mb-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  {transfer.lineItems.map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <div className="text-center">
+                        <div className="text-xs font-semibold text-slate-700">{item.fromLocation}</div>
+                        <div className="text-xs text-slate-500 mt-1">{item.quantity} {item.unitType}</div>
+                      </div>
+                      {idx < transfer.lineItems.length - 1 && (
+                        <ArrowRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                      )}
+                      {idx === transfer.lineItems.length - 1 && (
+                        <ArrowRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                      )}
+                    </div>
+                  ))}
+                  <div className="text-center">
+                    <div className="text-xs font-semibold text-slate-700">{transfer.lineItems[0]?.toLocation}</div>
+                    <div className="text-xs text-slate-500 mt-1">Destination</div>
                   </div>
                 </div>
+              </div>
 
-                <div className="text-right">
-                  <p className="font-semibold text-slate-900">{transfer.items.length} items</p>
-                  {transfer.status === 'pending' && (
-                    <div className="flex gap-2 mt-2">
-                      <Button size="sm" variant="outline" className="gap-1">
-                        <Check className="w-4 h-4" />
-                        Approve
-                      </Button>
-                      <Button size="sm" variant="outline" className="gap-1 text-red-600">
-                        <X className="w-4 h-4" />
-                        Reject
-                      </Button>
+              {/* Approval Status */}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-white/50 rounded p-2">
+                  <div className="text-xs font-semibold text-slate-700">Approver 1</div>
+                  <div className="text-xs text-slate-600 mt-1">{transfer.approver1}</div>
+                  <div className={`inline-block mt-1 px-2 py-0.5 text-xs rounded ${
+                    transfer.approver1Status === 'approved' ? 'bg-green-100 text-green-700' :
+                    transfer.approver1Status === 'rejected' ? 'bg-red-100 text-red-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {transfer.approver1Status === 'approved' && '✓ Approved'}
+                    {transfer.approver1Status === 'rejected' && '✗ Rejected'}
+                    {transfer.approver1Status === 'pending' && '⏳ Pending'}
+                  </div>
+                </div>
+                <div className="bg-white/50 rounded p-2">
+                  <div className="text-xs font-semibold text-slate-700">Approver 2</div>
+                  <div className="text-xs text-slate-600 mt-1">{transfer.approver2}</div>
+                  <div className={`inline-block mt-1 px-2 py-0.5 text-xs rounded ${
+                    transfer.approver2Status === 'approved' ? 'bg-green-100 text-green-700' :
+                    transfer.approver2Status === 'rejected' ? 'bg-red-100 text-red-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {transfer.approver2Status === 'approved' && '✓ Approved'}
+                    {transfer.approver2Status === 'rejected' && '✗ Rejected'}
+                    {transfer.approver2Status === 'pending' && '⏳ Pending'}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Create Transfer Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-border px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold">Create Transfer Request</h2>
+              <button onClick={() => { setShowCreateModal(false); resetForm(); }} className="text-slate-400 hover:text-slate-600">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Category Selection */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Category</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['ppe', 'tools', 'consumable', 'other'] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setFormData({ ...formData, category: cat })}
+                      className={`p-2 rounded-lg border-2 text-sm font-medium transition ${
+                        formData.category === cat
+                          ? 'bg-primary/20 border-primary text-primary'
+                          : 'bg-white border-border text-slate-600'
+                      }`}
+                    >
+                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Approver Selection */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="relative">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Approver 1 (Request Approver) *
+                  </label>
+                  <button
+                    onClick={() => setShowApprover1Dropdown(!showApprover1Dropdown)}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-left text-sm bg-white hover:bg-slate-50"
+                  >
+                    {formData.approver1Name || 'Select approver...'}
+                  </button>
+                  {showApprover1Dropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-40">
+                      {approverOptions.map((approver) => (
+                        <button
+                          key={approver.id}
+                          onClick={() => handleApprover1Select(approver)}
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 border-b border-border last:border-b-0"
+                        >
+                          <div className="font-medium text-slate-900">{approver.name}</div>
+                          <div className="text-xs text-slate-600">{approver.role}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Approver 2 (Receiver) *
+                  </label>
+                  <button
+                    onClick={() => setShowApprover2Dropdown(!showApprover2Dropdown)}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-left text-sm bg-white hover:bg-slate-50"
+                  >
+                    {formData.approver2Name || 'Select receiver...'}
+                  </button>
+                  {showApprover2Dropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-40">
+                      {approverOptions.map((approver) => (
+                        <button
+                          key={approver.id}
+                          onClick={() => handleApprover2Select(approver)}
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 border-b border-border last:border-b-0"
+                        >
+                          <div className="font-medium text-slate-900">{approver.name}</div>
+                          <div className="text-xs text-slate-600">{approver.role}</div>
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* Expanded Details */}
-            {expandedId === transfer.id && (
-              <div className="border-t border-border p-4 bg-slate-50">
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-semibold text-slate-900 mb-2">Transfer Items</h4>
-                    <div className="space-y-2">
-                      {transfer.items.map((item, idx) => {
-                        const itemDetails = inventoryItems.find((inv) => inv.id === item.itemId)
-                        return (
-                          <div key={idx} className="flex justify-between items-center p-2 bg-white rounded border border-border">
-                            <span className="text-sm text-slate-900">
-                              {itemDetails?.name} ({itemDetails?.sku})
-                            </span>
-                            <span className="font-semibold text-slate-900">Qty: {item.quantity}</span>
+              {/* Add Items Section */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Add Items *</label>
+                <div className="relative mb-4">
+                  <Input
+                    placeholder="Search items by name or SKU..."
+                    value={itemSearch}
+                    onChange={(e) => setItemSearch(e.target.value)}
+                    className="mb-2"
+                  />
+                  {itemSearch && searchResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 bg-white border border-border rounded-lg shadow-lg z-40">
+                      {searchResults.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => addLineItem(item.id)}
+                          className="w-full px-4 py-2 text-left text-sm hover:bg-slate-100 border-b border-border last:border-b-0"
+                        >
+                          <div className="font-medium">{item.name}</div>
+                          <div className="text-xs text-slate-600">SKU: {item.sku} | Stock: {item.quantity}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Line Items */}
+                {lineItems.length === 0 ? (
+                  <div className="text-center py-4 text-slate-600 text-sm bg-slate-50 rounded-lg">
+                    No items added yet. Search and add items above.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {lineItems.map((item, idx) => (
+                      <div key={item.id} className="bg-slate-50 rounded-lg p-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="font-medium text-sm text-slate-900">{item.itemName}</h4>
+                            <p className="text-xs text-slate-600">Stock: {item.stockByLocation[item.fromLocation] || 0} available</p>
                           </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <p className="text-slate-600">Created by</p>
-                      <p className="font-semibold text-slate-900">{transfer.createdBy}</p>
-                    </div>
-                    <div>
-                      <p className="text-slate-600">Created Date</p>
-                      <p className="font-semibold text-slate-900">{transfer.createdDate}</p>
-                    </div>
-                    {transfer.approvedBy && (
-                      <>
-                        <div>
-                          <p className="text-slate-600">Approved by</p>
-                          <p className="font-semibold text-slate-900">{transfer.approvedBy}</p>
+                          <button onClick={() => removeLineItem(idx)} className="text-red-600 hover:text-red-700">
+                            <X className="w-4 h-4" />
+                          </button>
                         </div>
-                        <div>
-                          <p className="text-slate-600">Approval Date</p>
-                          <p className="font-semibold text-slate-900">{transfer.approvalDate}</p>
+                        <div className="grid grid-cols-4 gap-2 text-sm">
+                          <div>
+                            <label className="block text-xs font-medium mb-1">Qty</label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => updateLineItem(idx, { quantity: parseInt(e.target.value) || 1 })}
+                              className="h-8"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1">Unit</label>
+                            <select
+                              value={item.unitType}
+                              onChange={(e) => updateLineItem(idx, { unitType: e.target.value as any })}
+                              className="h-8 w-full px-2 border border-border rounded"
+                            >
+                              <option>pcs</option>
+                              <option>sets</option>
+                              <option>boxes</option>
+                              <option>kg</option>
+                              <option>liters</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1">From</label>
+                            <select
+                              value={item.fromLocation}
+                              onChange={(e) => updateLineItem(idx, { fromLocation: e.target.value })}
+                              className="h-8 w-full px-2 border border-border rounded text-xs"
+                            >
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.name}>
+                                  {loc.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1">To</label>
+                            <select
+                              value={item.toLocation}
+                              onChange={(e) => updateLineItem(idx, { toLocation: e.target.value })}
+                              className="h-8 w-full px-2 border border-border rounded text-xs"
+                            >
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.name}>
+                                  {loc.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
-                      </>
-                    )}
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
               </div>
-            )}
-          </Card>
-        ))}
-      </div>
 
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md p-6">
-            <h2 className="text-xl font-bold text-slate-900 mb-4">Create New Transfer</h2>
-            <div className="space-y-4">
+              {/* Notes */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  From Location
-                </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.name}>
-                      {loc.name}
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Notes (Optional)</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Add any additional information..."
+                  className="w-full px-3 py-2 border border-border rounded-lg text-sm min-h-20"
+                />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  To Location
-                </label>
-                <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
-                  {locations.map((loc) => (
-                    <option key={loc.id} value={loc.name}>
-                      {loc.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Select Items
-                </label>
-                <div className="border border-border rounded-md p-2 bg-white max-h-40 overflow-y-auto">
-                  {inventoryItems.slice(0, 3).map((item) => (
-                    <label key={item.id} className="flex items-center gap-2 p-2 hover:bg-slate-50">
-                      <input type="checkbox" className="rounded" />
-                      <span className="text-sm">{item.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="flex gap-2 pt-4">
-                <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
-                  Cancel
-                </Button>
-                <Button onClick={() => setShowModal(false)} className="flex-1">
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4 border-t border-border">
+                <Button
+                  onClick={handleCreateTransfer}
+                  className="flex-1"
+                >
                   Create Transfer
+                </Button>
+                <Button
+                  onClick={() => { setShowCreateModal(false); resetForm(); }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
                 </Button>
               </div>
             </div>

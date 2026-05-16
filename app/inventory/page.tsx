@@ -1,20 +1,100 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Plus, Search, Download } from 'lucide-react'
+import { Plus, Search, Download, AlertCircle } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { inventoryItems, categories, locations } from '@/lib/mock-data'
+import { calculateInventoryStatus, formatDate } from '@/lib/inventory-utils'
+
+interface InventoryItem {
+  id: string
+  name: string
+  sku: string
+  category: string
+  location: string
+  quantity: number
+  minStock: number
+  maxThreshold: number
+  unitPrice: number
+  validityDate?: string
+  maintenanceScheduleDate?: string
+  status: 'ok' | 'low-stock' | 'out-of-stock'
+  lastUpdated: string
+}
+
+const categoryCodeMap: { [key: string]: string } = {
+  'PPE': 'PPE',
+  'Tools': 'TOOLS',
+  'Safety Equipment': 'SAFETY',
+  'IT Equipment': 'IT',
+  'Consumable': 'CONS',
+}
 
 export default function InventoryPage() {
+  const [items, setItems] = useState<InventoryItem[]>(inventoryItems)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [selectedLocation, setSelectedLocation] = useState('all')
   const [showModal, setShowModal] = useState(false)
+  const [formData, setFormData] = useState({ 
+    name: '', 
+    sku: '', 
+    category: '', 
+    location: '', 
+    quantity: '', 
+    minStock: '', 
+    maxThreshold: '',
+    unitPrice: '',
+    validityDate: '',
+    maintenanceScheduleDate: '',
+  })
+
+  const generateSKU = (category: string) => {
+    const categoryCode = categoryCodeMap[category] || category.substring(0, 3).toUpperCase()
+    const categoryItems = items.filter((item) => item.category === category)
+    const nextNumber = categoryItems.length + 1
+    return `${categoryCode}-${String(nextNumber).padStart(3, '0')}`
+  }
+
+  const handleCategoryChange = (newCategory: string) => {
+    setFormData({
+      ...formData,
+      category: newCategory,
+      sku: newCategory ? generateSKU(newCategory) : '',
+    })
+  }
+
+  const handleAddItem = () => {
+    if (!formData.name || !formData.category || !formData.location || !formData.quantity) {
+      alert('Please fill in all required fields')
+      return
+    }
+    const newItem: InventoryItem = {
+      id: (Math.max(...items.map(i => parseInt(i.id)), 0) + 1).toString(),
+      name: formData.name,
+      sku: formData.sku,
+      category: formData.category,
+      location: formData.location,
+      quantity: parseInt(formData.quantity) || 0,
+      minStock: parseInt(formData.minStock) || 0,
+      maxThreshold: parseInt(formData.maxThreshold) || 0,
+      unitPrice: parseFloat(formData.unitPrice) || 0,
+      validityDate: formData.validityDate || undefined,
+      maintenanceScheduleDate: formData.maintenanceScheduleDate || undefined,
+      status: 'ok',
+      lastUpdated: new Date().toISOString(),
+    }
+    // Recalculate status based on dates and quantities
+    newItem.status = calculateInventoryStatus(newItem) as any
+    setItems([...items, newItem])
+    setFormData({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', maxThreshold: '', unitPrice: '', validityDate: '', maintenanceScheduleDate: '' })
+    setShowModal(false)
+  }
 
   const filteredItems = useMemo(() => {
-    return inventoryItems.filter((item) => {
+    return items.filter((item) => {
       const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.sku.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory
@@ -51,10 +131,10 @@ export default function InventoryPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Inventory</h1>
-          <p className="text-slate-600 mt-1">Manage items across all locations</p>
+          <p className="text-slate-600">Manage items across all locations</p>
         </div>
         <div className="flex gap-2">
           <Button onClick={handleExport} variant="outline" className="gap-2">
@@ -62,8 +142,8 @@ export default function InventoryPage() {
             <span className="hidden sm:inline">Export</span>
           </Button>
           <Button onClick={() => setShowModal(true)} className="gap-2">
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Add Item</span>
+            <Plus className="w-5 h-5" />
+            Add Item
           </Button>
         </div>
       </div>
@@ -126,7 +206,7 @@ export default function InventoryPage() {
 
       {/* Results */}
       <div className="text-sm text-slate-600">
-        Showing {filteredItems.length} of {inventoryItems.length} items
+        Showing {filteredItems.length} of {items.length} items
       </div>
 
       {/* Table */}
@@ -142,36 +222,64 @@ export default function InventoryPage() {
                   SKU
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Category
-                </th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
                   Location
                 </th>
                 <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
-                  Quantity
+                  Qty
                 </th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
-                  Unit Price
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                  Status
+                </th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                  Validity Date
+                </th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                  Maintenance Due
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredItems.map((item) => {
-                const isLowStock = item.quantity < item.minStock
+                const computedStatus = calculateInventoryStatus(item)
+                const statusColor = computedStatus === 'ok' ? 'bg-green-100 text-green-700' : 
+                                   computedStatus === 'low-stock' ? 'bg-yellow-100 text-yellow-700' : 
+                                   computedStatus === 'expiring-soon' ? 'bg-amber-100 text-amber-700' :
+                                   computedStatus === 'expired' ? 'bg-red-100 text-red-700' :
+                                   'bg-red-100 text-red-700'
+                const statusLabel = computedStatus === 'ok' ? 'OK' :
+                                   computedStatus === 'low-stock' ? 'Low Stock' :
+                                   computedStatus === 'expiring-soon' ? 'Expiring Soon' :
+                                   computedStatus === 'expired' ? 'Expired' :
+                                   'Out of Stock'
+                
+                const today = new Date().toISOString().split('T')[0]
+                const maintenanceDue = item.maintenanceScheduleDate && item.maintenanceScheduleDate <= today
+                
                 return (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-sm text-slate-900">{item.name}</td>
+                  <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${maintenanceDue ? 'bg-orange-50' : ''}`}>
+                    <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{item.sku}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{item.category}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{item.location}</td>
-                    <td className={`px-4 py-3 text-right text-sm font-medium ${
-                      isLowStock ? 'text-red-600' : 'text-slate-900'
-                    }`}>
+                    <td className="px-4 py-3 text-right text-sm font-medium text-slate-900">
                       {item.quantity}
-                      {isLowStock && <span className="ml-2 text-xs bg-red-100 text-red-700 px-2 py-1 rounded">Low Stock</span>}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm text-slate-900">
-                      ${item.unitPrice.toFixed(2)}
+                    <td className="px-4 py-3">
+                      <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${statusColor}`}>
+                        {statusLabel}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {formatDate(item.validityDate)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {maintenanceDue ? (
+                        <div className="flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4 text-red-600" />
+                          <span className="text-xs font-semibold text-red-600">DUE</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-600">{formatDate(item.maintenanceScheduleDate)}</span>
+                      )}
                     </td>
                   </tr>
                 )
@@ -183,28 +291,41 @@ export default function InventoryPage() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md p-6">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowModal(false)}>
+          <Card className="w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-slate-900 mb-4">Add New Item</h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Item Name
                 </label>
-                <Input placeholder="Enter item name" />
+                <Input 
+                  placeholder="Enter item name" 
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   SKU
                 </label>
-                <Input placeholder="Enter SKU" />
+                <Input 
+                  placeholder="Enter SKU" 
+                  value={formData.sku}
+                  onChange={(e) => setFormData({...formData, sku: e.target.value})}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Category
                   </label>
-                  <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                  <select 
+                    value={formData.category}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                  >
+                    <option value="">Select Category</option>
                     {categories.map((cat) => (
                       <option key={cat.id} value={cat.name}>
                         {cat.name}
@@ -216,7 +337,12 @@ export default function InventoryPage() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     Location
                   </label>
-                  <select className="w-full px-3 py-2 border border-border rounded-md bg-white">
+                  <select 
+                    value={formData.location}
+                    onChange={(e) => setFormData({...formData, location: e.target.value})}
+                    className="w-full px-3 py-2 border border-border rounded-md bg-white"
+                  >
+                    <option value="">Select Location</option>
                     {locations.map((loc) => (
                       <option key={loc.id} value={loc.name}>
                         {loc.name}
@@ -225,17 +351,81 @@ export default function InventoryPage() {
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Quantity
-                </label>
-                <Input type="number" placeholder="0" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Min Threshold
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.minStock}
+                    onChange={(e) => setFormData({...formData, minStock: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Max Threshold
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.maxThreshold}
+                    onChange={(e) => setFormData({...formData, maxThreshold: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Quantity
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0" 
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({...formData, quantity: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Unit Price
+                  </label>
+                  <Input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={formData.unitPrice}
+                    onChange={(e) => setFormData({...formData, unitPrice: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Validity Date
+                  </label>
+                  <Input 
+                    type="date" 
+                    value={formData.validityDate}
+                    onChange={(e) => setFormData({...formData, validityDate: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Maintenance Schedule
+                  </label>
+                  <Input 
+                    type="date" 
+                    value={formData.maintenanceScheduleDate}
+                    onChange={(e) => setFormData({...formData, maintenanceScheduleDate: e.target.value})}
+                  />
+                </div>
               </div>
               <div className="flex gap-2 pt-4">
                 <Button onClick={() => setShowModal(false)} variant="outline" className="flex-1">
                   Cancel
                 </Button>
-                <Button onClick={() => setShowModal(false)} className="flex-1">
+                <Button onClick={handleAddItem} className="flex-1">
                   Add Item
                 </Button>
               </div>

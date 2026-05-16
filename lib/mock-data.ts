@@ -19,7 +19,11 @@ export interface InventoryItem {
   location: string
   quantity: number
   minStock: number
+  maxThreshold: number
   unitPrice: number
+  validityDate?: string
+  maintenanceScheduleDate?: string
+  status: 'ok' | 'low-stock' | 'out-of-stock'
   lastUpdated: string
 }
 
@@ -34,29 +38,70 @@ export interface PPEItem {
   lastUpdated: string
 }
 
-export interface Transfer {
+export interface TransferLineItem {
   id: string
+  itemId: string
+  itemName: string
+  category: string
+  quantity: number
+  unitType: 'pcs' | 'sets' | 'boxes' | 'kg' | 'liters'
   fromLocation: string
   toLocation: string
-  status: 'pending' | 'approved' | 'completed' | 'rejected'
-  items: { itemId: string; quantity: number }[]
+  stockByLocation: { [location: string]: number }
+  status: 'pending' | 'approved' | 'rejected'
+  approvalStatus?: 'pending' | 'approved' | 'rejected'
+  rejectionReason?: string
+  quantityReceived?: number
+  discrepancy?: string
+}
+
+export interface Transfer {
+  id: string
+  status: 'pending' | 'pending-approval1' | 'pending-approval2' | 'completed' | 'rejected'
+  lineItems: TransferLineItem[]
+  category: 'tools' | 'it-equipment' | 'ppe' | 'consumable' | 'other'
   createdBy: string
   createdDate: string
-  approvedBy?: string
-  approvalDate?: string
-  completedDate?: string
+  approver1?: string
+  approver1Status?: 'pending' | 'approved' | 'rejected'
+  approver1Date?: string
+  approver2?: string
+  approver2Status?: 'pending' | 'approved' | 'rejected'
+  approver2Date?: string
+  notes?: string
+  chainOfCustody?: Array<{
+    timestamp: string
+    action: string
+    user: string
+    location: string
+  }>
 }
 
 export interface MaintenanceTask {
   id: string
   equipmentId: string
   equipmentName: string
-  type: string
+  category: 'ppe' | 'equipment' | 'tools' | 'it-asset' | 'other'
   location: string
   scheduledDate: string
   status: 'pending' | 'in-progress' | 'completed' | 'overdue'
   assignedTo: string
   completedDate?: string
+  // PPE fields
+  releaseDate?: string
+  expiryDate?: string
+  ppeStatus?: 'valid' | 'expiring-soon' | 'expired'
+  // Equipment fields
+  maintenanceInterval?: number
+  lastMaintainedDate?: string
+  nextDueDate?: string
+  // Tools fields
+  locationLocked?: boolean
+  // IT Asset fields
+  warrantyDate?: string
+  assetTag?: string
+  // Other fields
+  notes?: string
 }
 
 export interface Approval {
@@ -90,61 +135,266 @@ export const categories: Category[] = [
   { id: '5', name: 'Documentation' },
 ]
 
-// Inventory Items
+// Inventory Items - Comprehensive realistic sample data
 export const inventoryItems: InventoryItem[] = [
+  // PPE Items
   {
     id: '1',
     name: 'Hard Hat - Yellow',
-    sku: 'HC-001',
+    sku: 'PPE-001',
     category: 'PPE',
     location: 'Main Plant',
     quantity: 245,
     minStock: 50,
+    maxThreshold: 500,
     unitPrice: 25.99,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
     lastUpdated: new Date().toISOString(),
   },
   {
     id: '2',
     name: 'Safety Glasses',
-    sku: 'SG-001',
+    sku: 'PPE-002',
     category: 'PPE',
     location: 'Offshore Rig A',
     quantity: 180,
     minStock: 100,
+    maxThreshold: 400,
     unitPrice: 15.50,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
     lastUpdated: new Date().toISOString(),
   },
   {
     id: '3',
     name: 'Steel-toe Boots',
-    sku: 'STB-001',
+    sku: 'PPE-003',
     category: 'PPE',
     location: 'Warehouse',
     quantity: 89,
     minStock: 30,
+    maxThreshold: 200,
     unitPrice: 89.99,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
     lastUpdated: new Date().toISOString(),
   },
   {
+    id: '6',
+    name: 'Safety Vest - Orange',
+    sku: 'PPE-004',
+    category: 'PPE',
+    location: 'Port Facility',
+    quantity: 156,
+    minStock: 40,
+    maxThreshold: 300,
+    unitPrice: 18.75,
+    validityDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Expiring soon
+    maintenanceScheduleDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Due
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '7',
+    name: 'Respirator - Half Face',
+    sku: 'PPE-005',
+    category: 'PPE',
+    location: 'Offshore Rig B',
+    quantity: 34,
+    minStock: 25,
+    maxThreshold: 100,
+    unitPrice: 145.00,
+    validityDate: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Expired
+    maintenanceScheduleDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Overdue
+    status: 'out-of-stock',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '8',
+    name: 'Work Gloves - Leather',
+    sku: 'PPE-006',
+    category: 'PPE',
+    location: 'Warehouse',
+    quantity: 412,
+    minStock: 100,
+    maxThreshold: 600,
+    unitPrice: 12.50,
+    validityDate: new Date(Date.now() + 270 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  // Safety Equipment
+  {
     id: '4',
     name: 'First Aid Kit',
-    sku: 'FK-001',
+    sku: 'SAFETY-001',
     category: 'Safety Equipment',
     location: 'Port Facility',
     quantity: 23,
     minStock: 10,
+    maxThreshold: 50,
     unitPrice: 49.99,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
     lastUpdated: new Date().toISOString(),
   },
   {
+    id: '9',
+    name: 'Fire Extinguisher - 5KG',
+    sku: 'SAFETY-002',
+    category: 'Safety Equipment',
+    location: 'Main Plant',
+    quantity: 12,
+    minStock: 5,
+    maxThreshold: 20,
+    unitPrice: 85.00,
+    validityDate: new Date(Date.now() + 200 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '10',
+    name: 'Safety Rope - 50m',
+    sku: 'SAFETY-003',
+    category: 'Safety Equipment',
+    location: 'Offshore Rig A',
+    quantity: 8,
+    minStock: 3,
+    maxThreshold: 15,
+    unitPrice: 245.00,
+    validityDate: new Date(Date.now() + 300 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  // Tools
+  {
     id: '5',
     name: 'Wrench Set',
-    sku: 'WS-001',
+    sku: 'TOOLS-001',
     category: 'Tools',
     location: 'Offshore Rig B',
     quantity: 12,
     minStock: 5,
+    maxThreshold: 25,
     unitPrice: 129.99,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'low-stock',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '11',
+    name: 'Drill Set - Professional',
+    sku: 'TOOLS-002',
+    category: 'Tools',
+    location: 'Main Plant',
+    quantity: 6,
+    minStock: 2,
+    maxThreshold: 12,
+    unitPrice: 299.99,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '12',
+    name: 'Socket Set - 56pcs',
+    sku: 'TOOLS-003',
+    category: 'Tools',
+    location: 'Warehouse',
+    quantity: 28,
+    minStock: 10,
+    maxThreshold: 50,
+    unitPrice: 89.50,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  // Parts & Supplies
+  {
+    id: '13',
+    name: 'Hydraulic Fluid - 20L',
+    sku: 'PARTS-001',
+    category: 'Parts & Supplies',
+    location: 'Main Plant',
+    quantity: 45,
+    minStock: 15,
+    maxThreshold: 80,
+    unitPrice: 125.00,
+    validityDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 150 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '14',
+    name: 'Coupling - 2 inch',
+    sku: 'PARTS-002',
+    category: 'Parts & Supplies',
+    location: 'Offshore Rig A',
+    quantity: 234,
+    minStock: 50,
+    maxThreshold: 400,
+    unitPrice: 45.75,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 200 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '15',
+    name: 'Valve - Ball Type',
+    sku: 'PARTS-003',
+    category: 'Parts & Supplies',
+    location: 'Port Facility',
+    quantity: 18,
+    minStock: 8,
+    maxThreshold: 40,
+    unitPrice: 185.00,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 100 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  // Documentation
+  {
+    id: '16',
+    name: 'Compliance Manual - 2024',
+    sku: 'DOC-001',
+    category: 'Documentation',
+    location: 'Main Plant',
+    quantity: 52,
+    minStock: 20,
+    maxThreshold: 100,
+    unitPrice: 35.00,
+    validityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: '17',
+    name: 'Safety Procedure Guide',
+    sku: 'DOC-002',
+    category: 'Documentation',
+    location: 'Offshore Rig B',
+    quantity: 87,
+    minStock: 30,
+    maxThreshold: 150,
+    unitPrice: 22.50,
+    validityDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    maintenanceScheduleDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    status: 'ok',
     lastUpdated: new Date().toISOString(),
   },
 ]
@@ -187,42 +437,100 @@ export const ppeItems: PPEItem[] = [
 export const transfers: Transfer[] = [
   {
     id: '1',
-    fromLocation: 'Warehouse',
-    toLocation: 'Main Plant',
-    status: 'pending',
-    items: [
-      { itemId: '1', quantity: 50 },
-      { itemId: '3', quantity: 20 },
+    status: 'pending-approval1',
+    lineItems: [
+      {
+        id: 'li-1',
+        itemId: '1',
+        itemName: 'Hard Hat - Yellow',
+        category: 'PPE',
+        quantity: 50,
+        unitType: 'pcs',
+        fromLocation: 'Warehouse',
+        toLocation: 'Main Plant',
+        stockByLocation: { 'Warehouse': 245, 'Main Plant': 120, 'Offshore Rig A': 0 },
+        status: 'pending',
+        approvalStatus: 'pending',
+      },
+      {
+        id: 'li-2',
+        itemId: '3',
+        itemName: 'Steel-toe Boots',
+        category: 'PPE',
+        quantity: 20,
+        unitType: 'pcs',
+        fromLocation: 'Warehouse',
+        toLocation: 'Main Plant',
+        stockByLocation: { 'Warehouse': 89, 'Main Plant': 45, 'Offshore Rig A': 0 },
+        status: 'pending',
+        approvalStatus: 'pending',
+      },
     ],
+    category: 'ppe',
     createdBy: 'John Doe',
     createdDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    approver1: 'Manager A',
+    approver1Status: 'pending',
+    approver2: 'Receiving Officer A',
+    approver2Status: 'pending',
   },
   {
     id: '2',
-    fromLocation: 'Main Plant',
-    toLocation: 'Offshore Rig A',
-    status: 'approved',
-    items: [
-      { itemId: '2', quantity: 30 },
+    status: 'pending-approval2',
+    lineItems: [
+      {
+        id: 'li-3',
+        itemId: '2',
+        itemName: 'Safety Glasses',
+        category: 'PPE',
+        quantity: 30,
+        unitType: 'sets',
+        fromLocation: 'Main Plant',
+        toLocation: 'Offshore Rig A',
+        stockByLocation: { 'Main Plant': 180, 'Offshore Rig A': 45, 'Warehouse': 0 },
+        status: 'approved',
+        approvalStatus: 'approved',
+        quantityReceived: 30,
+      },
     ],
+    category: 'ppe',
     createdBy: 'Jane Smith',
     createdDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    approvedBy: 'Manager',
-    approvalDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    approver1: 'Manager A',
+    approver1Status: 'approved',
+    approver1Date: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    approver2: 'Receiving Officer A',
+    approver2Status: 'pending',
   },
   {
     id: '3',
-    fromLocation: 'Offshore Rig A',
-    toLocation: 'Port Facility',
     status: 'completed',
-    items: [
-      { itemId: '4', quantity: 15 },
+    lineItems: [
+      {
+        id: 'li-4',
+        itemId: '4',
+        itemName: 'First Aid Kit',
+        category: 'Safety Equipment',
+        quantity: 15,
+        unitType: 'boxes',
+        fromLocation: 'Offshore Rig A',
+        toLocation: 'Port Facility',
+        stockByLocation: { 'Offshore Rig A': 23, 'Port Facility': 12, 'Warehouse': 0 },
+        status: 'approved',
+        approvalStatus: 'approved',
+        quantityReceived: 15,
+        discrepancy: 'All items received in good condition',
+      },
     ],
+    category: 'consumable',
     createdBy: 'Mike Johnson',
     createdDate: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    approvedBy: 'Supervisor',
-    approvalDate: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    completedDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    approver1: 'Supervisor',
+    approver1Status: 'approved',
+    approver1Date: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    approver2: 'Receiving Officer B',
+    approver2Status: 'approved',
+    approver2Date: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
   },
 ]
 
