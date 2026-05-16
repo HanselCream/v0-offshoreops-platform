@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, Download } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Plus, Search, Download, AlertCircle } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { inventoryItems, categories, locations } from '@/lib/mock-data'
+import { calculateInventoryStatus, formatDate } from '@/lib/inventory-utils'
 
 interface InventoryItem {
   id: string
@@ -71,7 +72,7 @@ export default function InventoryPage() {
       return
     }
     const newItem: InventoryItem = {
-      id: (Math.max(...items.map(i => parseInt(i.id))) + 1).toString(),
+      id: (Math.max(...items.map(i => parseInt(i.id)), 0) + 1).toString(),
       name: formData.name,
       sku: formData.sku,
       category: formData.category,
@@ -82,9 +83,11 @@ export default function InventoryPage() {
       unitPrice: parseFloat(formData.unitPrice) || 0,
       validityDate: formData.validityDate || undefined,
       maintenanceScheduleDate: formData.maintenanceScheduleDate || undefined,
-      status: parseInt(formData.quantity) === 0 ? 'out-of-stock' : parseInt(formData.quantity) <= parseInt(formData.minStock) ? 'low-stock' : 'ok',
+      status: 'ok',
       lastUpdated: new Date().toISOString(),
     }
+    // Recalculate status based on dates and quantities
+    newItem.status = calculateInventoryStatus(newItem) as any
     setItems([...items, newItem])
     setFormData({ name: '', sku: '', category: '', location: '', quantity: '', minStock: '', maxThreshold: '', unitPrice: '', validityDate: '', maintenanceScheduleDate: '' })
     setShowModal(false)
@@ -219,43 +222,64 @@ export default function InventoryPage() {
                   SKU
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Status
+                  Location
                 </th>
                 <th className="px-4 py-3 text-right text-sm font-semibold text-slate-900">
                   Qty
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
-                  Min / Max
+                  Status
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
                   Validity Date
+                </th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-slate-900">
+                  Maintenance Due
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filteredItems.map((item) => {
-                const statusColor = item.status === 'ok' ? 'bg-green-100 text-green-700' : 
-                                   item.status === 'low-stock' ? 'bg-yellow-100 text-yellow-700' : 
+                const computedStatus = calculateInventoryStatus(item)
+                const statusColor = computedStatus === 'ok' ? 'bg-green-100 text-green-700' : 
+                                   computedStatus === 'low-stock' ? 'bg-yellow-100 text-yellow-700' : 
+                                   computedStatus === 'expiring-soon' ? 'bg-amber-100 text-amber-700' :
+                                   computedStatus === 'expired' ? 'bg-red-100 text-red-700' :
                                    'bg-red-100 text-red-700'
-                const statusLabel = item.status === 'ok' ? 'OK' :
-                                   item.status === 'low-stock' ? 'Low Stock' : 'Out of Stock'
+                const statusLabel = computedStatus === 'ok' ? 'OK' :
+                                   computedStatus === 'low-stock' ? 'Low Stock' :
+                                   computedStatus === 'expiring-soon' ? 'Expiring Soon' :
+                                   computedStatus === 'expired' ? 'Expired' :
+                                   'Out of Stock'
+                
+                const today = new Date().toISOString().split('T')[0]
+                const maintenanceDue = item.maintenanceScheduleDate && item.maintenanceScheduleDate <= today
+                
                 return (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${maintenanceDue ? 'bg-orange-50' : ''}`}>
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{item.sku}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">{item.location}</td>
+                    <td className="px-4 py-3 text-right text-sm font-medium text-slate-900">
+                      {item.quantity}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block px-2 py-1 text-xs font-semibold rounded ${statusColor}`}>
                         {statusLabel}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-sm font-medium text-slate-900">
-                      {item.quantity}
-                    </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
-                      {item.minStock} / {item.maxThreshold}
+                      {formatDate(item.validityDate)}
                     </td>
-                    <td className="px-4 py-3 text-sm text-slate-600">
-                      {item.validityDate ? new Date(item.validityDate).toLocaleDateString() : '-'}
+                    <td className="px-4 py-3">
+                      {maintenanceDue ? (
+                        <div className="flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4 text-red-600" />
+                          <span className="text-xs font-semibold text-red-600">DUE</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-600">{formatDate(item.maintenanceScheduleDate)}</span>
+                      )}
                     </td>
                   </tr>
                 )

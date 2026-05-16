@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Plus, AlertCircle, CheckCircle, Clock, Calendar } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { maintenanceTasks, locations, ppeItems } from '@/lib/mock-data'
+import { maintenanceTasks, locations, ppeItems, inventoryItems } from '@/lib/mock-data'
+import { getItemsDueMaintenance, getExpiredItems, createMaintenanceFromInventory } from '@/lib/inventory-utils'
 import type { MaintenanceTask } from '@/lib/mock-data'
 
 const statusColors = {
@@ -13,13 +14,37 @@ const statusColors = {
   'in-progress': 'bg-amber-100 text-amber-700',
   completed: 'bg-green-100 text-green-700',
   overdue: 'bg-red-100 text-red-700',
+  due: 'bg-orange-100 text-orange-700',
+  'due-soon': 'bg-amber-100 text-amber-700',
   'valid': 'bg-green-100 text-green-700',
   'expiring-soon': 'bg-amber-100 text-amber-700',
   'expired': 'bg-red-100 text-red-700',
 }
 
 export default function MaintenancePage() {
-  const [tasks, setTasks] = useState<MaintenanceTask[]>(maintenanceTasks)
+  // Auto-populate maintenance tasks from inventory on load
+  const generateAutoMaintenanceTasks = () => {
+    const autoTasks: MaintenanceTask[] = []
+    
+    // Add expired items
+    const expiredItems = getExpiredItems(inventoryItems)
+    expiredItems.forEach(item => {
+      autoTasks.push(createMaintenanceFromInventory(item, 'expired'))
+    })
+    
+    // Add items due for maintenance
+    const dueTasks = getItemsDueMaintenance(inventoryItems)
+    dueTasks.forEach(item => {
+      autoTasks.push(createMaintenanceFromInventory(item, 'due-maintenance'))
+    })
+    
+    return autoTasks
+  }
+
+  const [tasks, setTasks] = useState<MaintenanceTask[]>(() => {
+    const autoTasks = generateAutoMaintenanceTasks()
+    return [...autoTasks, ...maintenanceTasks]
+  })
   const [tab, setTab] = useState<'equipment' | 'ppe'>('equipment')
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')

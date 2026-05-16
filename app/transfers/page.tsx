@@ -1,42 +1,62 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Plus, Search, X, AlertCircle, Check, TrendingUp } from 'lucide-react'
+import { Plus, X, AlertCircle, ArrowRight, Check, MapPin } from 'lucide-react'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { transfers, inventoryItems, locations } from '@/lib/mock-data'
+import { transfers, inventoryItems, locations, categories } from '@/lib/mock-data'
+import { calculateInventoryStatus } from '@/lib/inventory-utils'
 import type { Transfer, TransferLineItem } from '@/lib/mock-data'
+
+interface ApproverOption {
+  id: string
+  name: string
+  role: string
+}
+
+const approverOptions: ApproverOption[] = [
+  { id: '1', name: 'Manager A', role: 'Transfer Approver' },
+  { id: '2', name: 'Manager B', role: 'Transfer Approver' },
+  { id: '3', name: 'Supervisor', role: 'Transfer Approver' },
+  { id: '4', name: 'Receiving Officer A', role: 'Receiver' },
+  { id: '5', name: 'Receiving Officer B', role: 'Receiver' },
+  { id: '6', name: 'Field Supervisor', role: 'Receiver' },
+]
 
 export default function TransfersPage() {
   const [transferList, setTransferList] = useState<Transfer[]>(transfers)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null)
-  
-  // Form data for creating new transfer
+
+  // Form state
   const [formData, setFormData] = useState({
     category: 'ppe' as const,
     approver1: '',
+    approver1Name: '',
     approver2: '',
+    approver2Name: '',
     notes: '',
   })
-  
-  // Line items being added
+
   const [lineItems, setLineItems] = useState<TransferLineItem[]>([])
   const [itemSearch, setItemSearch] = useState('')
-  const [selectedItemIndex, setSelectedItemIndex] = useState<number | null>(null)
+  const [showApprover1Dropdown, setShowApprover1Dropdown] = useState(false)
+  const [showApprover2Dropdown, setShowApprover2Dropdown] = useState(false)
 
   const searchResults = useMemo(() => {
     if (!itemSearch.trim()) return []
-    return inventoryItems.filter(item =>
-      item.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
-      item.sku.toLowerCase().includes(itemSearch.toLowerCase())
-    ).slice(0, 8)
+    return inventoryItems
+      .filter((item) =>
+        item.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
+        item.sku.toLowerCase().includes(itemSearch.toLowerCase())
+      )
+      .slice(0, 8)
   }, [itemSearch])
 
   const addLineItem = (itemId: string) => {
-    const item = inventoryItems.find(i => i.id === itemId)
+    const item = inventoryItems.find((i) => i.id === itemId)
     if (!item) return
 
     const newLineItem: TransferLineItem = {
@@ -46,18 +66,16 @@ export default function TransfersPage() {
       category: item.category,
       quantity: 1,
       unitType: 'pcs',
-      fromLocation: 'Warehouse',
-      toLocation: 'Main Plant',
+      fromLocation: locations[0]?.name || 'Warehouse',
+      toLocation: locations[1]?.name || 'Main Plant',
       stockByLocation: {
-        'Warehouse': item.quantity,
-        'Main Plant': 100,
-        'Offshore Rig A': 50,
-        'Port Facility': 30,
+        [item.location]: item.quantity,
+        [locations[1]?.name || 'Main Plant']: 0,
       },
       status: 'pending',
       approvalStatus: 'pending',
     }
-    
+
     setLineItems([...lineItems, newLineItem])
     setItemSearch('')
   }
@@ -73,87 +91,116 @@ export default function TransfersPage() {
   }
 
   const handleCreateTransfer = () => {
-    if (!formData.approver1 || !formData.approver2 || lineItems.length === 0) {
-      alert('Please fill in all required fields and add at least one item')
+    const errors: string[] = []
+
+    if (!formData.approver1 || !formData.approver1Name) {
+      errors.push('Please assign both approvers before submitting')
+    }
+    if (!formData.approver2 || !formData.approver2Name) {
+      errors.push('Please assign both approvers before submitting')
+    }
+    if (lineItems.length === 0) {
+      errors.push('Please add at least one item to transfer')
+    }
+
+    // Check stock availability
+    lineItems.forEach((item, idx) => {
+      const stock = item.stockByLocation[item.fromLocation] || 0
+      if (stock === 0) {
+        errors.push(`Line ${idx + 1}: No stock available at "${item.fromLocation}"`)
+      }
+      if (item.quantity > stock) {
+        errors.push(`Line ${idx + 1}: Only ${stock} units available, but ${item.quantity} requested`)
+      }
+    })
+
+    if (errors.length > 0) {
+      alert(errors.join('\n'))
       return
     }
 
     const newTransfer: Transfer = {
-      id: `TR-${Date.now()}`,
+      id: `t-${Date.now()}`,
       status: 'pending-approval1',
-      lineItems: lineItems.map(item => ({ ...item, status: 'pending', approvalStatus: 'pending' })),
+      lineItems,
       category: formData.category,
       createdBy: 'Current User',
       createdDate: new Date().toISOString().split('T')[0],
-      approver1: formData.approver1,
+      approver1: formData.approver1Name,
       approver1Status: 'pending',
-      approver2: formData.approver2,
+      approver2: formData.approver2Name,
       approver2Status: 'pending',
       notes: formData.notes,
     }
 
     setTransferList([newTransfer, ...transferList])
-    setLineItems([])
-    setFormData({ category: 'ppe', approver1: '', approver2: '', notes: '' })
+    resetForm()
     setShowCreateModal(false)
   }
 
-  const handleApproveLineItem = (transferId: string, lineItemId: string, approverLevel: number) => {
-    setTransferList(transferList.map(t => {
-      if (t.id !== transferId) return t
-      const updated = { ...t }
-      updated.lineItems = updated.lineItems.map(li => {
-        if (li.id !== lineItemId) return li
-        if (approverLevel === 1) {
-          return { ...li, approvalStatus: 'approved' }
-        } else {
-          return { ...li, status: 'approved', approvalStatus: 'approved' }
-        }
-      })
-      
-      // Update transfer status
-      const allApproved = updated.lineItems.every(li => li.approvalStatus === 'approved')
-      if (approverLevel === 1 && allApproved) {
-        updated.approver1Status = 'approved'
-        updated.status = 'pending-approval2'
-      } else if (approverLevel === 2 && allApproved) {
-        updated.approver2Status = 'approved'
-        updated.status = 'completed'
-      }
-      
-      return updated
-    }))
+  const resetForm = () => {
+    setFormData({ category: 'ppe', approver1: '', approver1Name: '', approver2: '', approver2Name: '', notes: '' })
+    setLineItems([])
+    setItemSearch('')
   }
 
-  const handleRejectLineItem = (transferId: string, lineItemId: string, reason: string) => {
-    setTransferList(transferList.map(t => {
-      if (t.id !== transferId) return t
-      const updated = { ...t }
-      updated.lineItems = updated.lineItems.map(li => {
-        if (li.id !== lineItemId) return li
-        return { ...li, approvalStatus: 'rejected', rejectionReason: reason }
-      })
-      updated.status = 'rejected'
-      return updated
-    }))
+  const handleApprover1Select = (approver: ApproverOption) => {
+    setFormData({
+      ...formData,
+      approver1: approver.id,
+      approver1Name: approver.name,
+    })
+    setShowApprover1Dropdown(false)
+  }
+
+  const handleApprover2Select = (approver: ApproverOption) => {
+    setFormData({
+      ...formData,
+      approver2: approver.id,
+      approver2Name: approver.name,
+    })
+    setShowApprover2Dropdown(false)
   }
 
   const filteredTransfers = useMemo(() => {
-    return transferList.filter(t => {
-      const matchesSearch = t.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.createdBy.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.approver1?.toLowerCase().includes(searchTerm.toLowerCase())
-      return matchesSearch
-    })
-  }, [transferList, searchTerm])
+    return transferList.filter(
+      (t) =>
+        t.lineItems.some((li) =>
+          li.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          li.fromLocation.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          li.toLocation.toLowerCase().includes(searchTerm.toLowerCase())
+        ) ||
+        t.createdBy.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+  }, [searchTerm, transferList])
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      'pending-approval1': 'bg-blue-50 border-blue-200',
+      'pending-approval2': 'bg-yellow-50 border-yellow-200',
+      'completed': 'bg-green-50 border-green-200',
+      'rejected': 'bg-red-50 border-red-200',
+    }
+    return colors[status] || 'bg-gray-50 border-gray-200'
+  }
+
+  const getStatusBadgeColor = (status: string) => {
+    const colors: Record<string, string> = {
+      'pending-approval1': 'bg-blue-100 text-blue-800',
+      'pending-approval2': 'bg-yellow-100 text-yellow-800',
+      'completed': 'bg-green-100 text-green-800',
+      'rejected': 'bg-red-100 text-red-800',
+    }
+    return colors[status] || 'bg-gray-100 text-gray-800'
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Item Transfers</h1>
-          <p className="text-slate-600">Full chain of custody: transfer request → approval → photo proof → digital sign-off</p>
+          <h1 className="text-3xl font-bold text-slate-900">Transfer Requests</h1>
+          <p className="text-slate-600">Track item movements with full chain of custody</p>
         </div>
         <Button onClick={() => setShowCreateModal(true)} className="gap-2">
           <Plus className="w-5 h-5" />
@@ -161,309 +208,177 @@ export default function TransfersPage() {
         </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-          <Input
-            placeholder="Search by transfer ID, requester, or approver..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
+      {/* Search */}
+      <div className="relative">
+        <Input
+          placeholder="Search by item, location, or requester..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-10"
+        />
       </div>
 
-      {/* Transfers List */}
+      {/* Transfer List */}
       <div className="space-y-4">
         {filteredTransfers.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="text-slate-500">No transfers found</p>
-          </Card>
+          <Card className="p-8 text-center text-slate-600">No transfers found</Card>
         ) : (
-          filteredTransfers.map(transfer => {
-            const approvedCount = transfer.lineItems.filter(li => li.approvalStatus === 'approved').length
-            const rejectedCount = transfer.lineItems.filter(li => li.approvalStatus === 'rejected').length
-            const statusColor = transfer.status === 'completed' ? 'bg-green-50 border-green-200' :
-              transfer.status === 'rejected' ? 'bg-red-50 border-red-200' :
-              'bg-blue-50 border-blue-200'
-            const statusLabel = transfer.status === 'pending-approval1' ? 'Awaiting Approver 1' :
-              transfer.status === 'pending-approval2' ? 'Awaiting Approver 2' :
-              transfer.status === 'completed' ? 'Completed' : 'Rejected'
-
-            return (
-              <Card key={transfer.id} className={`border-l-4 ${statusColor} overflow-hidden`}>
-                {/* Transfer Header */}
-                <div className="p-4 border-b border-border">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-slate-900">{transfer.id}</h3>
-                        <span className="text-xs px-2 py-1 rounded-full bg-slate-200 text-slate-700">
-                          {transfer.category.toUpperCase()}
-                        </span>
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          transfer.status === 'completed' ? 'bg-green-200 text-green-700' :
-                          transfer.status === 'rejected' ? 'bg-red-200 text-red-700' :
-                          'bg-blue-200 text-blue-700'
-                        }`}>
-                          {statusLabel}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-600 mt-1">
-                        Created by {transfer.createdBy} on {transfer.createdDate}
-                      </p>
-                      {approvedCount > 0 || rejectedCount > 0 ? (
-                        <p className="text-sm font-medium mt-1">
-                          {approvedCount} Approved / {rejectedCount} Rejected
-                        </p>
-                      ) : null}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedTransfer(selectedTransfer?.id === transfer.id ? null : transfer)}
-                    >
-                      {selectedTransfer?.id === transfer.id ? 'Hide Details' : 'View Details'}
-                    </Button>
-                  </div>
+          filteredTransfers.map((transfer) => (
+            <Card
+              key={transfer.id}
+              className={`p-4 border-2 cursor-pointer transition ${getStatusColor(transfer.status)}`}
+              onClick={() => setSelectedTransfer(transfer)}
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Transfer {transfer.id}</h3>
+                  <p className="text-sm text-slate-600">Created by {transfer.createdBy} on {transfer.createdDate}</p>
                 </div>
+                <span className={`inline-block px-3 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(transfer.status)}`}>
+                  {transfer.status === 'pending-approval1' && 'Awaiting Approver 1'}
+                  {transfer.status === 'pending-approval2' && 'Awaiting Approver 2'}
+                  {transfer.status === 'completed' && 'Completed'}
+                  {transfer.status === 'rejected' && 'Rejected'}
+                </span>
+              </div>
 
-                {/* Line Items */}
-                {selectedTransfer?.id === transfer.id && (
-                  <div className="divide-y divide-border">
-                    {transfer.lineItems.map((lineItem, idx) => {
-                      const fromStock = lineItem.stockByLocation[lineItem.fromLocation] || 0
-                      const insufficientStock = fromStock === 0
-
-                      return (
-                        <div key={lineItem.id} className="p-4">
-                          <div className="grid grid-cols-12 gap-3 items-start">
-                            {/* Item Info */}
-                            <div className="col-span-3">
-                              <p className="font-semibold text-slate-900">{lineItem.itemName}</p>
-                              <p className="text-sm text-slate-600">{lineItem.category}</p>
-                            </div>
-
-                            {/* Stock Info */}
-                            <div className="col-span-2 text-sm">
-                              <p className="text-slate-600">Stock:</p>
-                              {Object.entries(lineItem.stockByLocation).map(([loc, qty]) => (
-                                <p key={loc} className="text-slate-700">
-                                  {loc}: <span className="font-medium">{qty}</span>
-                                </p>
-                              ))}
-                            </div>
-
-                            {/* Quantity & Unit */}
-                            <div className="col-span-2">
-                              <p className="font-semibold text-slate-900">{lineItem.quantity}</p>
-                              <p className="text-sm text-slate-600">{lineItem.unitType}</p>
-                            </div>
-
-                            {/* From → To Locations */}
-                            <div className="col-span-2">
-                              <p className="font-semibold text-slate-900">{lineItem.fromLocation}</p>
-                              <div className="flex items-center gap-2 my-1 text-sm text-slate-600">
-                                <TrendingUp className="w-3 h-3" />
-                              </div>
-                              <p className="font-semibold text-slate-900">{lineItem.toLocation}</p>
-                            </div>
-
-                            {/* Approval Status */}
-                            <div className="col-span-3">
-                              {insufficientStock ? (
-                                <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-                                  <AlertCircle className="w-4 h-4" />
-                                  Insufficient stock
-                                </div>
-                              ) : lineItem.approvalStatus === 'pending' ? (
-                                <div className="flex gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="flex-1 gap-1"
-                                    onClick={() => handleApproveLineItem(transfer.id, lineItem.id, 1)}
-                                  >
-                                    <Check className="w-4 h-4" />
-                                    Approve
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="flex-1 text-red-600 gap-1"
-                                    onClick={() => {
-                                      const reason = prompt('Enter rejection reason:')
-                                      if (reason) handleRejectLineItem(transfer.id, lineItem.id, reason)
-                                    }}
-                                  >
-                                    <X className="w-4 h-4" />
-                                    Reject
-                                  </Button>
-                                </div>
-                              ) : lineItem.approvalStatus === 'approved' ? (
-                                <div className="flex items-center gap-2 p-2 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
-                                  <Check className="w-4 h-4" />
-                                  Approved
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-                                  <X className="w-4 h-4" />
-                                  Rejected
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Received Quantity and Discrepancies (for Approver 2) */}
-                          {lineItem.quantityReceived !== undefined && (
-                            <div className="mt-3 p-3 bg-slate-50 rounded text-sm">
-                              <p className="text-slate-700">
-                                Received: <span className="font-semibold">{lineItem.quantityReceived}</span> / {lineItem.quantity}
-                              </p>
-                              {lineItem.discrepancy && (
-                                <p className="text-slate-700 mt-1">
-                                  Note: {lineItem.discrepancy}
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Rejection Reason */}
-                          {lineItem.rejectionReason && (
-                            <div className="mt-3 p-3 bg-red-50 rounded text-sm text-red-700">
-                              Rejection Reason: {lineItem.rejectionReason}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {/* Transfer Summary */}
-                {selectedTransfer?.id === transfer.id && (
-                  <div className="p-4 bg-slate-50 border-t border-border">
-                    <div className="grid grid-cols-3 gap-4 text-sm">
-                      <div>
-                        <p className="text-slate-600">Approver 1</p>
-                        <p className="font-semibold text-slate-900">{transfer.approver1}</p>
-                        <p className={`text-xs mt-1 ${transfer.approver1Status === 'approved' ? 'text-green-700' : transfer.approver1Status === 'rejected' ? 'text-red-700' : 'text-slate-600'}`}>
-                          {transfer.approver1Status === 'approved' ? '✓ Approved' : transfer.approver1Status === 'pending' ? 'Pending' : 'Rejected'}
-                        </p>
+              {/* Shipment Tracker */}
+              <div className="bg-white/50 rounded-lg p-3 mb-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  {transfer.lineItems.map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <div className="text-center">
+                        <div className="text-xs font-semibold text-slate-700">{item.fromLocation}</div>
+                        <div className="text-xs text-slate-500 mt-1">{item.quantity} {item.unitType}</div>
                       </div>
-                      <div>
-                        <p className="text-slate-600">Approver 2</p>
-                        <p className="font-semibold text-slate-900">{transfer.approver2}</p>
-                        <p className={`text-xs mt-1 ${transfer.approver2Status === 'approved' ? 'text-green-700' : transfer.approver2Status === 'rejected' ? 'text-red-700' : 'text-slate-600'}`}>
-                          {transfer.approver2Status === 'approved' ? '✓ Approved' : transfer.approver2Status === 'pending' ? 'Pending' : 'Rejected'}
-                        </p>
-                      </div>
-                      {transfer.notes && (
-                        <div>
-                          <p className="text-slate-600">Notes</p>
-                          <p className="font-semibold text-slate-900">{transfer.notes}</p>
-                        </div>
+                      {idx < transfer.lineItems.length - 1 && (
+                        <ArrowRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                      )}
+                      {idx === transfer.lineItems.length - 1 && (
+                        <ArrowRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
                       )}
                     </div>
+                  ))}
+                  <div className="text-center">
+                    <div className="text-xs font-semibold text-slate-700">{transfer.lineItems[0]?.toLocation}</div>
+                    <div className="text-xs text-slate-500 mt-1">Destination</div>
                   </div>
-                )}
-              </Card>
-            )
-          })
+                </div>
+              </div>
+
+              {/* Approval Status */}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-white/50 rounded p-2">
+                  <div className="text-xs font-semibold text-slate-700">Approver 1</div>
+                  <div className="text-xs text-slate-600 mt-1">{transfer.approver1}</div>
+                  <div className={`inline-block mt-1 px-2 py-0.5 text-xs rounded ${
+                    transfer.approver1Status === 'approved' ? 'bg-green-100 text-green-700' :
+                    transfer.approver1Status === 'rejected' ? 'bg-red-100 text-red-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {transfer.approver1Status === 'approved' && '✓ Approved'}
+                    {transfer.approver1Status === 'rejected' && '✗ Rejected'}
+                    {transfer.approver1Status === 'pending' && '⏳ Pending'}
+                  </div>
+                </div>
+                <div className="bg-white/50 rounded p-2">
+                  <div className="text-xs font-semibold text-slate-700">Approver 2</div>
+                  <div className="text-xs text-slate-600 mt-1">{transfer.approver2}</div>
+                  <div className={`inline-block mt-1 px-2 py-0.5 text-xs rounded ${
+                    transfer.approver2Status === 'approved' ? 'bg-green-100 text-green-700' :
+                    transfer.approver2Status === 'rejected' ? 'bg-red-100 text-red-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {transfer.approver2Status === 'approved' && '✓ Approved'}
+                    {transfer.approver2Status === 'rejected' && '✗ Rejected'}
+                    {transfer.approver2Status === 'pending' && '⏳ Pending'}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))
         )}
       </div>
 
       {/* Create Transfer Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowCreateModal(false)}>
-          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-slate-900">Create Transfer Request</h2>
-              <button onClick={() => setShowCreateModal(false)} className="text-slate-500 hover:text-slate-700">
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-border px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold">Create Transfer Request</h2>
+              <button onClick={() => { setShowCreateModal(false); resetForm(); }} className="text-slate-400 hover:text-slate-600">
+                <X className="w-6 h-6" />
               </button>
             </div>
 
-            <div className="space-y-4">
-              {/* Transfer Category */}
+            <div className="p-6 space-y-6">
+              {/* Category Selection */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Transfer Category
-                </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
-                  className="w-full px-3 py-2 border border-border rounded-md bg-white"
-                >
-                  <option value="ppe">PPE</option>
-                  <option value="tools">Tools</option>
-                  <option value="it-equipment">IT Equipment</option>
-                  <option value="consumable">Consumable</option>
-                  <option value="other">Other</option>
-                </select>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Category</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['ppe', 'tools', 'consumable', 'other'] as const).map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setFormData({ ...formData, category: cat })}
+                      className={`p-2 rounded-lg border-2 text-sm font-medium transition ${
+                        formData.category === cat
+                          ? 'bg-primary/20 border-primary text-primary'
+                          : 'bg-white border-border text-slate-600'
+                      }`}
+                    >
+                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Approvers */}
+              {/* Approver Selection */}
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Approver 1 (Request Approver)
-                  </label>
-                  <Input
-                    placeholder="Manager name"
-                    value={formData.approver1}
-                    onChange={(e) => setFormData({ ...formData, approver1: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Approver 2 (Receiver)
-                  </label>
-                  <Input
-                    placeholder="Receiving officer"
-                    value={formData.approver2}
-                    onChange={(e) => setFormData({ ...formData, approver2: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Transfer Notes
-                </label>
-                <textarea
-                  placeholder="Add any notes..."
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  rows={3}
-                />
-              </div>
-
-              {/* Item Search */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Add Items to Transfer
-                </label>
                 <div className="relative">
-                  <Input
-                    placeholder="Search items by name or SKU..."
-                    value={itemSearch}
-                    onChange={(e) => setItemSearch(e.target.value)}
-                    className="w-full"
-                  />
-                  {itemSearch && searchResults.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 mt-1 border border-border rounded-md bg-white shadow-lg z-10">
-                      {searchResults.map((item) => (
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Approver 1 (Request Approver) *
+                  </label>
+                  <button
+                    onClick={() => setShowApprover1Dropdown(!showApprover1Dropdown)}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-left text-sm bg-white hover:bg-slate-50"
+                  >
+                    {formData.approver1Name || 'Select approver...'}
+                  </button>
+                  {showApprover1Dropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-40">
+                      {approverOptions.map((approver) => (
                         <button
-                          key={item.id}
-                          onClick={() => addLineItem(item.id)}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-100 text-sm"
+                          key={approver.id}
+                          onClick={() => handleApprover1Select(approver)}
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 border-b border-border last:border-b-0"
                         >
-                          <p className="font-semibold text-slate-900">{item.name}</p>
-                          <p className="text-slate-600">{item.sku} • {item.category} • Stock: {item.quantity}</p>
+                          <div className="font-medium text-slate-900">{approver.name}</div>
+                          <div className="text-xs text-slate-600">{approver.role}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="relative">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Approver 2 (Receiver) *
+                  </label>
+                  <button
+                    onClick={() => setShowApprover2Dropdown(!showApprover2Dropdown)}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-left text-sm bg-white hover:bg-slate-50"
+                  >
+                    {formData.approver2Name || 'Select receiver...'}
+                  </button>
+                  {showApprover2Dropdown && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-border rounded-lg shadow-lg z-40">
+                      {approverOptions.map((approver) => (
+                        <button
+                          key={approver.id}
+                          onClick={() => handleApprover2Select(approver)}
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 border-b border-border last:border-b-0"
+                        >
+                          <div className="font-medium text-slate-900">{approver.name}</div>
+                          <div className="text-xs text-slate-600">{approver.role}</div>
                         </button>
                       ))}
                     </div>
@@ -471,86 +386,135 @@ export default function TransfersPage() {
                 </div>
               </div>
 
-              {/* Added Line Items */}
-              {lineItems.length > 0 && (
-                <div className="space-y-3 mt-4 pt-4 border-t border-border">
-                  <h3 className="font-semibold text-slate-900">Items to Transfer ({lineItems.length})</h3>
-                  {lineItems.map((item, idx) => (
-                    <Card key={item.id} className="p-3 bg-slate-50">
-                      <div className="grid grid-cols-12 gap-2 items-end">
-                        <div className="col-span-3">
-                          <p className="font-semibold text-slate-900 text-sm">{item.itemName}</p>
-                        </div>
-                        <div className="col-span-1">
-                          <label className="text-xs text-slate-600">Qty</label>
-                          <Input
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => updateLineItem(idx, { quantity: parseInt(e.target.value) || 1 })}
-                            className="text-sm h-8"
-                          />
-                        </div>
-                        <div className="col-span-1">
-                          <label className="text-xs text-slate-600">Unit</label>
-                          <select
-                            value={item.unitType}
-                            onChange={(e) => updateLineItem(idx, { unitType: e.target.value as any })}
-                            className="w-full px-2 py-1 border border-border rounded text-xs h-8"
-                          >
-                            <option value="pcs">pcs</option>
-                            <option value="sets">sets</option>
-                            <option value="boxes">boxes</option>
-                            <option value="kg">kg</option>
-                            <option value="liters">liters</option>
-                          </select>
-                        </div>
-                        <div className="col-span-2">
-                          <label className="text-xs text-slate-600">From</label>
-                          <select
-                            value={item.fromLocation}
-                            onChange={(e) => updateLineItem(idx, { fromLocation: e.target.value })}
-                            className="w-full px-2 py-1 border border-border rounded text-xs h-8"
-                          >
-                            {locations.map((loc) => (
-                              <option key={loc.id} value={loc.name}>{loc.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="col-span-2">
-                          <label className="text-xs text-slate-600">To</label>
-                          <select
-                            value={item.toLocation}
-                            onChange={(e) => updateLineItem(idx, { toLocation: e.target.value })}
-                            className="w-full px-2 py-1 border border-border rounded text-xs h-8"
-                          >
-                            {locations.map((loc) => (
-                              <option key={loc.id} value={loc.name}>{loc.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="col-span-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => removeLineItem(idx)}
-                            className="w-full text-red-600 h-8"
-                          >
+              {/* Add Items Section */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Add Items *</label>
+                <div className="relative mb-4">
+                  <Input
+                    placeholder="Search items by name or SKU..."
+                    value={itemSearch}
+                    onChange={(e) => setItemSearch(e.target.value)}
+                    className="mb-2"
+                  />
+                  {itemSearch && searchResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 bg-white border border-border rounded-lg shadow-lg z-40">
+                      {searchResults.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => addLineItem(item.id)}
+                          className="w-full px-4 py-2 text-left text-sm hover:bg-slate-100 border-b border-border last:border-b-0"
+                        >
+                          <div className="font-medium">{item.name}</div>
+                          <div className="text-xs text-slate-600">SKU: {item.sku} | Stock: {item.quantity}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Line Items */}
+                {lineItems.length === 0 ? (
+                  <div className="text-center py-4 text-slate-600 text-sm bg-slate-50 rounded-lg">
+                    No items added yet. Search and add items above.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {lineItems.map((item, idx) => (
+                      <div key={item.id} className="bg-slate-50 rounded-lg p-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="font-medium text-sm text-slate-900">{item.itemName}</h4>
+                            <p className="text-xs text-slate-600">Stock: {item.stockByLocation[item.fromLocation] || 0} available</p>
+                          </div>
+                          <button onClick={() => removeLineItem(idx)} className="text-red-600 hover:text-red-700">
                             <X className="w-4 h-4" />
-                          </Button>
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 text-sm">
+                          <div>
+                            <label className="block text-xs font-medium mb-1">Qty</label>
+                            <Input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => updateLineItem(idx, { quantity: parseInt(e.target.value) || 1 })}
+                              className="h-8"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1">Unit</label>
+                            <select
+                              value={item.unitType}
+                              onChange={(e) => updateLineItem(idx, { unitType: e.target.value as any })}
+                              className="h-8 w-full px-2 border border-border rounded"
+                            >
+                              <option>pcs</option>
+                              <option>sets</option>
+                              <option>boxes</option>
+                              <option>kg</option>
+                              <option>liters</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1">From</label>
+                            <select
+                              value={item.fromLocation}
+                              onChange={(e) => updateLineItem(idx, { fromLocation: e.target.value })}
+                              className="h-8 w-full px-2 border border-border rounded text-xs"
+                            >
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.name}>
+                                  {loc.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium mb-1">To</label>
+                            <select
+                              value={item.toLocation}
+                              onChange={(e) => updateLineItem(idx, { toLocation: e.target.value })}
+                              className="h-8 w-full px-2 border border-border rounded text-xs"
+                            >
+                              {locations.map((loc) => (
+                                <option key={loc.id} value={loc.name}>
+                                  {loc.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </div>
-                    </Card>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-2 pt-4 border-t border-border">
-                <Button onClick={() => setShowCreateModal(false)} variant="outline" className="flex-1">
-                  Cancel
-                </Button>
-                <Button onClick={handleCreateTransfer} className="flex-1">
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Notes (Optional)</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Add any additional information..."
+                  className="w-full px-3 py-2 border border-border rounded-lg text-sm min-h-20"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4 border-t border-border">
+                <Button
+                  onClick={handleCreateTransfer}
+                  className="flex-1"
+                >
                   Create Transfer
+                </Button>
+                <Button
+                  onClick={() => { setShowCreateModal(false); resetForm(); }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
                 </Button>
               </div>
             </div>
